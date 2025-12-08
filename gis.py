@@ -138,6 +138,7 @@ def generate_one_page(
     full_outline: str,
     aspect_ratio: str,
     resolution: str,
+    output_dir: Path,
 ) -> None:
     """Generate image for a single page."""
     try:
@@ -150,7 +151,7 @@ def generate_one_page(
         final_prompt = final_prompt.replace("{full_outline}", full_outline)
 
         # Save the final prompt to file
-        Path(f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
 
         client = client_config.create_client()
 
@@ -176,7 +177,7 @@ def generate_one_page(
             ),
         )
 
-        text_path = Path(f"Page{page.index}.txt")
+        text_path = output_dir / f"Page{page.index}.txt"
 
         if response.parts is not None:
             texts = []
@@ -184,7 +185,7 @@ def generate_one_page(
                 if part.text is not None:
                     texts.append(part.text)
                 elif image := part.as_image():
-                    image.save(f"Page{page.index}.png")
+                    image.save(output_dir / f"Page{page.index}.png")
 
             if texts:
                 text_path.write_text("\n".join(texts), encoding="utf-8")
@@ -204,6 +205,7 @@ def generate_cover_page(
     full_outline: str,
     aspect_ratio: str,
     resolution: str,
+    output_dir: Path,
 ) -> str | None:
     """Generate cover page image and return its path."""
     try:
@@ -216,7 +218,7 @@ def generate_cover_page(
         final_prompt = final_prompt.replace("{full_outline}", full_outline)
 
         # Save the final prompt to file
-        Path(f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
 
         client = client_config.create_client()
 
@@ -236,8 +238,8 @@ def generate_cover_page(
             ),
         )
 
-        cover_path = f"Page{page.index}.png"
-        text_path = Path(f"Page{page.index}.txt")
+        cover_path = output_dir / f"Page{page.index}.png"
+        text_path = output_dir / f"Page{page.index}.txt"
 
         if response.parts is not None:
             texts = []
@@ -347,6 +349,11 @@ def main() -> None:
         default=None,
         help="Path to service account JSON key file for Vertex AI (env: GOOGLE_APPLICATION_CREDENTIALS)"
     )
+    parser.add_argument(
+        "-d", "--output-directory",
+        default=None,
+        help="Directory to store output files (.txt and .png) (env: GIS_OUTPUT_DIRECTORY, default: current directory)"
+    )
 
     args = parser.parse_args()
 
@@ -390,6 +397,7 @@ def main() -> None:
     project = resolve(args.project, "project", "GIS_PROJECT")
     location = resolve(args.location, "location", "GIS_LOCATION", DEFAULT_LOCATION)
     credentials = resolve(args.credentials, "credentials", "GOOGLE_APPLICATION_CREDENTIALS")
+    output_directory = resolve(args.output_directory, "output_directory", "GIS_OUTPUT_DIRECTORY", ".")
 
     # Validate required parameters
     if not topic:
@@ -409,12 +417,16 @@ def main() -> None:
     if not image_prompt_path:
         parser.error("--image-prompt is required (or set in config file or GIS_IMAGE_PROMPT env var)")
 
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_directory)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     # Read prompt templates
     outline_prompt = Path(outline_prompt_path).read_text(encoding="utf-8")
     image_prompt_template = Path(image_prompt_path).read_text(encoding="utf-8")
 
-    # Setup logging
-    log_file = Path("gen.log")
+    # Setup logging (log file goes to output directory)
+    log_file = output_dir / "gen.log"
     setup_logger(log_file)
 
     logging.info(f"主题: {topic}")
@@ -424,6 +436,7 @@ def main() -> None:
         logging.info(f"使用 Vertex AI 模式 (project: {project}, location: {location})")
     else:
         logging.info(f"使用 API Key 模式 (base_url: {base_url})")
+    logging.info(f"输出目录: {output_dir.absolute()}")
 
     # Create client configuration
     client_config = ClientConfig(
@@ -442,8 +455,8 @@ def main() -> None:
     full_outline = generate_outline(client, text_model, outline_prompt, topic)
 
     # Save the outline for reference
-    Path("outline.txt").write_text(full_outline, encoding="utf-8")
-    logging.info("大纲已保存到 outline.txt")
+    (output_dir / "outline.txt").write_text(full_outline, encoding="utf-8")
+    logging.info(f"大纲已保存到 {output_dir / 'outline.txt'}")
 
     # Step 2: Parse outline into pages
     pages = parse_outline(full_outline)
@@ -466,6 +479,7 @@ def main() -> None:
         full_outline=full_outline,
         aspect_ratio=aspect_ratio,
         resolution=resolution,
+        output_dir=output_dir,
     )
 
     # Step 4: Generate remaining pages in parallel
@@ -483,6 +497,7 @@ def main() -> None:
             full_outline=full_outline,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            output_dir=output_dir,
         )
 
         with multiprocessing.Pool(processes=parallel) as pool:

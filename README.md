@@ -26,6 +26,7 @@ python gis.py "主题" [选项...]
 | `--resolution` | `-s` | `GIS_RESOLUTION` | `1K` | 图片分辨率 |
 | `--config` | `-c` | `GIS_CONFIG` | - | JSON 配置文件路径 |
 | `--parallel` | `-j` | `GIS_PARALLEL` | `2` | 并行生成图片的进程数 |
+| `--output-directory` | `-d` | `GIS_OUTPUT_DIRECTORY` | `.` | 输出文件目录（存放 .txt 和 .png 文件） |
 
 ### Vertex AI 参数
 
@@ -78,7 +79,8 @@ python gis.py "主题" [选项...]
     "vertex": false,
     "project": "your-gcp-project-id",
     "location": "us-central1",
-    "credentials": "path/to/service-account.json"
+    "credentials": "path/to/service-account.json",
+    "output_directory": "./output"
 }
 ```
 
@@ -93,7 +95,7 @@ python gis.py -c config.json
 ### 命令行方式
 
 ```bash
-python gis.py "Python入门教程" -k YOUR_API_KEY -r style.png -o outline.txt -p image.txt
+python gis.py "Python入门教程" -k YOUR_API_KEY -r style.png -o outline.txt -p image.txt -d ./output
 ```
 
 ### 环境变量方式
@@ -126,6 +128,8 @@ python gis.py "主题" -o outline.txt -p image.txt -a 16:9
 ```
 
 ## 输出文件
+
+所有输出文件默认保存在当前目录，可通过 `--output-directory` 指定其他目录：
 
 - `outline.txt` - 生成的大纲文本
 - `Page1.png`, `Page2.png`, ... - 生成的各页图片
