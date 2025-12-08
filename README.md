@@ -41,13 +41,14 @@ python gis.py "主题" [选项...]
 | 参数 | API Key 模式 | Vertex AI 模式 |
 |------|-------------|----------------|
 | `api_key` | ✅ 必需 | ❌ 不需要 |
-| `base_url` | ✅ 可选（有默认值） | ❌ 不需要（自动构建） |
+| `base_url` | ✅ 可选（有默认值） | ✅ 可选（支持私有端点） |
 | `project` | ❌ 不需要 | ✅ 必需 |
 | `location` | ❌ 不需要 | ✅ 可选（默认 us-central1） |
 | `credentials` | ❌ 不需要 | ✅ 需要* |
 
 > **注意**: 
-> - Vertex AI 模式下，SDK 会根据 `project` 和 `location` 自动构建 API 端点，无需手动指定 `base_url`
+> - Vertex AI 模式下，SDK 默认根据 `project` 和 `location` 自动构建 API 端点
+> - 如需使用私有端点，可通过 `base_url` 自定义
 > - `credentials` 在 GCP 虚拟机等环境下可自动获取，但普通用户通常需要提供服务账号 JSON 文件
 
 ### 可选值
@@ -72,7 +73,12 @@ python gis.py "主题" [选项...]
     "image_prompt": "image_prompt.txt",
     "aspect_ratio": "3:4",
     "resolution": "1K",
-    "parallel": 2
+    "parallel": 2,
+
+    "vertex": false,
+    "project": "your-gcp-project-id",
+    "location": "us-central1",
+    "credentials": "path/to/service-account.json"
 }
 ```
 

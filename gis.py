@@ -41,10 +41,15 @@ class ClientConfig:
             # Set credentials environment variable if provided
             if self.credentials:
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.credentials
+            # Support custom base_url for Vertex AI (e.g., private endpoints)
+            http_opts = None
+            if self.base_url != DEFAULT_BASE_URL:
+                http_opts = types.HttpOptions(base_url=self.base_url)
             return genai.Client(
                 vertexai=True,
                 project=self.project,
                 location=self.location,
+                http_options=http_opts,
             )
         else:
             return genai.Client(
