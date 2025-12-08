@@ -5,14 +5,26 @@ import json
 import logging
 import os
 import re
+import sys
 import multiprocessing
 from functools import partial
 from pathlib import Path
 from dataclasses import dataclass
 
-from google import genai
-from google.genai import types
-from PIL import Image
+try:
+    from google import genai
+    from google.genai import types
+except ImportError as e:
+    print(f"Error: Failed to import google-genai library: {e}")
+    print("Please install it with: pip install google-genai")
+    sys.exit(1)
+
+try:
+    from PIL import Image
+except ImportError as e:
+    print(f"Error: Failed to import PIL (Pillow) library: {e}")
+    print("Please install it with: pip install Pillow")
+    sys.exit(1)
 
 DEFAULT_ASPECT_RATIO = "3:4"  # "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 DEFAULT_RESOLUTION = "1K"  # "1K", "2K", "4K"
@@ -37,25 +49,36 @@ class ClientConfig:
 
     def create_client(self) -> genai.Client:
         """Create a GenAI client based on the configuration."""
-        if self.vertex:
-            # Set credentials environment variable if provided
-            if self.credentials:
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.credentials
-            # Support custom base_url for Vertex AI (e.g., private endpoints)
-            http_opts = None
-            if self.base_url != DEFAULT_BASE_URL:
-                http_opts = types.HttpOptions(base_url=self.base_url)
-            return genai.Client(
-                vertexai=True,
-                project=self.project,
-                location=self.location,
-                http_options=http_opts,
-            )
-        else:
-            return genai.Client(
-                api_key=self.api_key,
-                http_options=types.HttpOptions(base_url=self.base_url),
-            )
+        try:
+            if self.vertex:
+                # Set credentials environment variable if provided
+                if self.credentials:
+                    if not Path(self.credentials).exists():
+                        raise FileNotFoundError(f"Credentials file not found: {self.credentials}")
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.credentials
+                # Support custom base_url for Vertex AI (e.g., private endpoints)
+                http_opts = None
+                if self.base_url != DEFAULT_BASE_URL:
+                    http_opts = types.HttpOptions(base_url=self.base_url)
+                return genai.Client(
+                    vertexai=True,
+                    project=self.project,
+                    location=self.location,
+                    http_options=http_opts,
+                )
+            else:
+                if not self.api_key:
+                    raise ValueError("API key is required for non-Vertex AI mode")
+                return genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(base_url=self.base_url),
+                )
+        except FileNotFoundError:
+            raise
+        except ValueError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Failed to create GenAI client: {e}") from e
 
 @dataclass
 class PageInfo:
@@ -87,12 +110,33 @@ def generate_outline(
     final_prompt = outline_prompt.replace("{topic}", user_topic)
 
     logging.info("正在使用文本模型生成大纲...")
-    response = client.models.generate_content(
-        model=text_model,
-        contents=[final_prompt],
-    )
+    try:
+        response = client.models.generate_content(
+            model=text_model,
+            contents=[final_prompt],
+        )
+    except Exception as e:
+        logging.error(f"大纲生成 API 调用失败: {e}")
+        raise RuntimeError(f"Failed to generate outline: {e}") from e
+
+    if response is None:
+        raise RuntimeError("API returned None response for outline generation")
+
+    # Check for blocked content or safety filters
+    if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+        if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
+            raise RuntimeError(f"Prompt was blocked: {response.prompt_feedback.block_reason}")
+
+    if hasattr(response, 'candidates') and response.candidates:
+        for candidate in response.candidates:
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                if candidate.finish_reason not in ('STOP', 'MAX_TOKENS', 1):
+                    logging.warning(f"大纲生成可能被截断或过滤: finish_reason={candidate.finish_reason}")
 
     outline_text = response.text if response.text else ""
+    if not outline_text.strip():
+        logging.warning("大纲生成结果为空")
+
     logging.info(f"大纲生成完成，共 {len(outline_text)} 字符")
     return outline_text
 
@@ -139,8 +183,12 @@ def generate_one_page(
     aspect_ratio: str,
     resolution: str,
     output_dir: Path,
-) -> None:
-    """Generate image for a single page."""
+) -> bool:
+    """Generate image for a single page.
+    
+    Returns:
+        True if generation succeeded, False otherwise.
+    """
     try:
         logging.info(f"开始生成 Page{page.index} [{page.page_type}] …")
 
@@ -151,33 +199,70 @@ def generate_one_page(
         final_prompt = final_prompt.replace("{full_outline}", full_outline)
 
         # Save the final prompt to file
-        (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        try:
+            (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        except OSError as e:
+            logging.error(f"无法保存 Page{page.index} 的 prompt 文件: {e}")
+            return False
 
-        client = client_config.create_client()
+        try:
+            client = client_config.create_client()
+        except Exception as e:
+            logging.error(f"创建 API 客户端失败 (Page{page.index}): {e}")
+            return False
 
         # Build contents with reference images
         contents = [final_prompt]
 
         # Add style reference image if provided
-        if style_image_path and Path(style_image_path).exists():
-            contents.append(Image.open(style_image_path))
+        if style_image_path:
+            style_path = Path(style_image_path)
+            if style_path.exists():
+                try:
+                    contents.append(Image.open(style_path))
+                except (OSError, IOError) as e:
+                    logging.warning(f"无法打开风格参考图 {style_image_path}: {e}")
+            else:
+                logging.warning(f"风格参考图不存在: {style_image_path}")
 
         # Add cover image as reference for non-cover pages
-        if page.page_type != "封面" and cover_image_path and Path(cover_image_path).exists():
-            contents.append(Image.open(cover_image_path))
+        if page.page_type != "封面" and cover_image_path:
+            cover_path = Path(cover_image_path)
+            if cover_path.exists():
+                try:
+                    contents.append(Image.open(cover_path))
+                except (OSError, IOError) as e:
+                    logging.warning(f"无法打开封面参考图 {cover_image_path}: {e}")
+            else:
+                logging.warning(f"封面参考图不存在: {cover_image_path}")
 
-        response = client.models.generate_content(
-            model=image_model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio, image_size=resolution
+        try:
+            response = client.models.generate_content(
+                model=image_model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio=aspect_ratio, image_size=resolution
+                    ),
                 ),
-            ),
-        )
+            )
+        except Exception as e:
+            logging.error(f"图像生成 API 调用失败 (Page{page.index}): {e}")
+            return False
+
+        if response is None:
+            logging.error(f"API 返回空响应 (Page{page.index})")
+            return False
+
+        # Check for safety/content filtering
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
+                logging.error(f"Page{page.index} prompt 被阻止: {response.prompt_feedback.block_reason}")
+                return False
 
         text_path = output_dir / f"Page{page.index}.txt"
+        image_saved = False
 
         if response.parts is not None:
             texts = []
@@ -185,14 +270,33 @@ def generate_one_page(
                 if part.text is not None:
                     texts.append(part.text)
                 elif image := part.as_image():
-                    image.save(output_dir / f"Page{page.index}.png")
+                    try:
+                        image.save(output_dir / f"Page{page.index}.png")
+                        image_saved = True
+                    except (OSError, IOError) as e:
+                        logging.error(f"无法保存 Page{page.index} 图片: {e}")
+                        return False
 
             if texts:
-                text_path.write_text("\n".join(texts), encoding="utf-8")
+                try:
+                    text_path.write_text("\n".join(texts), encoding="utf-8")
+                except OSError as e:
+                    logging.warning(f"无法保存 Page{page.index} 文本响应: {e}")
+        else:
+            logging.warning(f"Page{page.index} 响应中没有 parts")
+
+        if not image_saved:
+            logging.warning(f"Page{page.index} 没有生成图片")
 
         logging.info(f"完成 Page{page.index}")
+        return True
+
+    except KeyboardInterrupt:
+        logging.warning(f"Page{page.index} 生成被用户中断")
+        raise
     except Exception as e:
-        logging.exception(f"生成 Page{page.index} 失败: {e}")
+        logging.exception(f"生成 Page{page.index} 时发生未预期错误: {e}")
+        return False
 
 
 def generate_cover_page(
@@ -207,7 +311,11 @@ def generate_cover_page(
     resolution: str,
     output_dir: Path,
 ) -> str | None:
-    """Generate cover page image and return its path."""
+    """Generate cover page image and return its path.
+    
+    Returns:
+        Path to the generated cover image, or None if generation failed.
+    """
     try:
         logging.info(f"开始生成封面 Page{page.index} …")
 
@@ -218,28 +326,58 @@ def generate_cover_page(
         final_prompt = final_prompt.replace("{full_outline}", full_outline)
 
         # Save the final prompt to file
-        (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        try:
+            (output_dir / f"page{page.index}.txt").write_text(final_prompt, encoding="utf-8")
+        except OSError as e:
+            logging.error(f"无法保存封面 prompt 文件: {e}")
+            return None
 
-        client = client_config.create_client()
+        try:
+            client = client_config.create_client()
+        except Exception as e:
+            logging.error(f"创建 API 客户端失败: {e}")
+            return None
 
         # Build contents with optional style reference image
         contents = [final_prompt]
-        if style_image_path and Path(style_image_path).exists():
-            contents.append(Image.open(style_image_path))
+        if style_image_path:
+            style_path = Path(style_image_path)
+            if style_path.exists():
+                try:
+                    contents.append(Image.open(style_path))
+                except (OSError, IOError) as e:
+                    logging.warning(f"无法打开风格参考图 {style_image_path}: {e}，继续生成...")
+            else:
+                logging.warning(f"风格参考图不存在: {style_image_path}")
 
-        response = client.models.generate_content(
-            model=image_model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio, image_size=resolution
+        try:
+            response = client.models.generate_content(
+                model=image_model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio=aspect_ratio, image_size=resolution
+                    ),
                 ),
-            ),
-        )
+            )
+        except Exception as e:
+            logging.error(f"封面图像生成 API 调用失败: {e}")
+            return None
+
+        if response is None:
+            logging.error("封面生成 API 返回空响应")
+            return None
+
+        # Check for safety/content filtering
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
+                logging.error(f"封面 prompt 被阻止: {response.prompt_feedback.block_reason}")
+                return None
 
         cover_path = output_dir / f"Page{page.index}.png"
         text_path = output_dir / f"Page{page.index}.txt"
+        cover_saved = False
 
         if response.parts is not None:
             texts = []
@@ -247,15 +385,33 @@ def generate_cover_page(
                 if part.text is not None:
                     texts.append(part.text)
                 elif image := part.as_image():
-                    image.save(cover_path)
+                    try:
+                        image.save(cover_path)
+                        cover_saved = True
+                    except (OSError, IOError) as e:
+                        logging.error(f"无法保存封面图片: {e}")
+                        return None
 
             if texts:
-                text_path.write_text("\n".join(texts), encoding="utf-8")
+                try:
+                    text_path.write_text("\n".join(texts), encoding="utf-8")
+                except OSError as e:
+                    logging.warning(f"无法保存封面文本响应: {e}")
+        else:
+            logging.warning("封面响应中没有 parts")
+
+        if not cover_saved:
+            logging.error("封面没有生成图片")
+            return None
 
         logging.info(f"完成封面 Page{page.index}")
-        return cover_path
+        return str(cover_path)
+
+    except KeyboardInterrupt:
+        logging.warning("封面生成被用户中断")
+        raise
     except Exception as e:
-        logging.exception(f"生成封面 Page{page.index} 失败: {e}")
+        logging.exception(f"生成封面 Page{page.index} 时发生未预期错误: {e}")
         return None
 
 
@@ -363,7 +519,20 @@ def main() -> None:
     if config_path:
         config_file = Path(config_path)
         if config_file.exists():
-            config = json.loads(config_file.read_text(encoding="utf-8"))
+            try:
+                config_content = config_file.read_text(encoding="utf-8")
+            except OSError as e:
+                parser.error(f"Failed to read config file {config_path}: {e}")
+            except UnicodeDecodeError as e:
+                parser.error(f"Config file {config_path} has invalid encoding (expected UTF-8): {e}")
+            
+            try:
+                config = json.loads(config_content)
+            except json.JSONDecodeError as e:
+                parser.error(f"Config file {config_path} contains invalid JSON: {e}")
+            
+            if not isinstance(config, dict):
+                parser.error(f"Config file {config_path} must contain a JSON object, got {type(config).__name__}")
         else:
             parser.error(f"Config file not found: {config_path}")
 
@@ -419,11 +588,49 @@ def main() -> None:
 
     # Create output directory if it doesn't exist
     output_dir = Path(output_directory)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        parser.error(f"Failed to create output directory {output_directory}: {e}")
+
+    # Check output directory is writable
+    if not os.access(output_dir, os.W_OK):
+        parser.error(f"Output directory is not writable: {output_directory}")
 
     # Read prompt templates
-    outline_prompt = Path(outline_prompt_path).read_text(encoding="utf-8")
-    image_prompt_template = Path(image_prompt_path).read_text(encoding="utf-8")
+    outline_prompt_file = Path(outline_prompt_path)
+    if not outline_prompt_file.exists():
+        parser.error(f"Outline prompt file not found: {outline_prompt_path}")
+    try:
+        outline_prompt = outline_prompt_file.read_text(encoding="utf-8")
+    except OSError as e:
+        parser.error(f"Failed to read outline prompt file {outline_prompt_path}: {e}")
+    except UnicodeDecodeError as e:
+        parser.error(f"Outline prompt file {outline_prompt_path} has invalid encoding: {e}")
+
+    if not outline_prompt.strip():
+        parser.error(f"Outline prompt file is empty: {outline_prompt_path}")
+
+    image_prompt_file = Path(image_prompt_path)
+    if not image_prompt_file.exists():
+        parser.error(f"Image prompt file not found: {image_prompt_path}")
+    try:
+        image_prompt_template = image_prompt_file.read_text(encoding="utf-8")
+    except OSError as e:
+        parser.error(f"Failed to read image prompt file {image_prompt_path}: {e}")
+    except UnicodeDecodeError as e:
+        parser.error(f"Image prompt file {image_prompt_path} has invalid encoding: {e}")
+
+    if not image_prompt_template.strip():
+        parser.error(f"Image prompt file is empty: {image_prompt_path}")
+
+    # Validate reference image if provided
+    if ref_image:
+        ref_image_path = Path(ref_image)
+        if not ref_image_path.exists():
+            logging.warning(f"Reference image not found: {ref_image}")
+        elif not ref_image_path.is_file():
+            parser.error(f"Reference image path is not a file: {ref_image}")
 
     # Setup logging (log file goes to output directory)
     log_file = output_dir / "gen.log"
@@ -449,41 +656,75 @@ def main() -> None:
     )
 
     # Create Gemini client for outline generation
-    client = client_config.create_client()
+    try:
+        client = client_config.create_client()
+    except FileNotFoundError as e:
+        logging.error(f"凭据文件错误: {e}")
+        sys.exit(1)
+    except ValueError as e:
+        logging.error(f"配置错误: {e}")
+        sys.exit(1)
+    except RuntimeError as e:
+        logging.error(f"创建 API 客户端失败: {e}")
+        sys.exit(1)
 
     # Step 1: Generate outline using text model
-    full_outline = generate_outline(client, text_model, outline_prompt, topic)
+    try:
+        full_outline = generate_outline(client, text_model, outline_prompt, topic)
+    except RuntimeError as e:
+        logging.error(f"生成大纲失败: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logging.warning("大纲生成被用户中断")
+        sys.exit(130)  # Standard exit code for Ctrl+C
+
+    if not full_outline.strip():
+        logging.error("生成的大纲为空，无法继续")
+        sys.exit(1)
 
     # Save the outline for reference
-    (output_dir / "outline.txt").write_text(full_outline, encoding="utf-8")
-    logging.info(f"大纲已保存到 {output_dir / 'outline.txt'}")
+    try:
+        (output_dir / "outline.txt").write_text(full_outline, encoding="utf-8")
+        logging.info(f"大纲已保存到 {output_dir / 'outline.txt'}")
+    except OSError as e:
+        logging.error(f"无法保存大纲文件: {e}")
+        sys.exit(1)
 
     # Step 2: Parse outline into pages
     pages = parse_outline(full_outline)
     if not pages:
         logging.error("大纲解析失败，没有找到有效页面")
-        return
+        sys.exit(1)
 
     total = len(pages)
     logging.info(f"开始生成 {total} 页图片…")
 
     # Step 3: Generate cover page first (synchronously)
     cover_page = next((p for p in pages if p.page_type == "封面"), pages[0])
-    cover_image_path = generate_cover_page(
-        page=cover_page,
-        style_image_path=ref_image,
-        client_config=client_config,
-        image_model=image_model,
-        image_prompt_template=image_prompt_template,
-        user_topic=topic,
-        full_outline=full_outline,
-        aspect_ratio=aspect_ratio,
-        resolution=resolution,
-        output_dir=output_dir,
-    )
+    try:
+        cover_image_path = generate_cover_page(
+            page=cover_page,
+            style_image_path=ref_image,
+            client_config=client_config,
+            image_model=image_model,
+            image_prompt_template=image_prompt_template,
+            user_topic=topic,
+            full_outline=full_outline,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            output_dir=output_dir,
+        )
+    except KeyboardInterrupt:
+        logging.warning("封面生成被用户中断，程序退出")
+        sys.exit(130)
+
+    if cover_image_path is None:
+        logging.warning("封面生成失败，后续页面将不使用封面作为参考")
 
     # Step 4: Generate remaining pages in parallel
     remaining_pages = [p for p in pages if p.index != cover_page.index]
+    failed_pages = []
+    success_count = 1  # Cover page already processed
 
     if remaining_pages:
         worker = partial(
@@ -500,11 +741,43 @@ def main() -> None:
             output_dir=output_dir,
         )
 
-        with multiprocessing.Pool(processes=parallel) as pool:
-            for idx, _ in enumerate(pool.imap_unordered(worker, remaining_pages), start=2):
-                logging.info(f"整体进度：{idx}/{total} ({idx / total:.0%})")
+        try:
+            with multiprocessing.Pool(processes=parallel) as pool:
+                try:
+                    results = list(zip(remaining_pages, pool.imap(worker, remaining_pages)))
+                    for page, success in results:
+                        if success:
+                            success_count += 1
+                        else:
+                            failed_pages.append(page.index)
+                        logging.info(f"整体进度：{success_count}/{total}")
+                except KeyboardInterrupt:
+                    logging.warning("图像生成被用户中断，正在终止进程池...")
+                    pool.terminate()
+                    pool.join()
+                    sys.exit(130)
+        except OSError as e:
+            logging.error(f"进程池创建失败: {e}")
+            logging.info("回退到串行处理模式...")
+            # Fallback to serial processing
+            for page in remaining_pages:
+                try:
+                    success = worker(page)
+                    if success:
+                        success_count += 1
+                    else:
+                        failed_pages.append(page.index)
+                    logging.info(f"整体进度：{success_count}/{total}")
+                except KeyboardInterrupt:
+                    logging.warning("图像生成被用户中断")
+                    sys.exit(130)
 
-    logging.info("全部页面生成完成。")
+    # Summary
+    if failed_pages:
+        logging.warning(f"以下页面生成失败: {failed_pages}")
+        logging.info(f"成功生成 {success_count}/{total} 页 ({success_count / total:.0%})")
+    else:
+        logging.info(f"全部 {total} 页图片生成完成。")
 
 
 if __name__ == "__main__":
