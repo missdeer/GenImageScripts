@@ -1,0 +1,19 @@
+{
+    "topic": "5分钟学会手冲咖啡",
+    "api_key": "your-gemini-api-key-here",
+    "base_url": "https://generativelanguage.googleapis.com",
+    "ref_image": "style.png",
+    "image_model": "gemini-3-image-pro-preview",
+    "text_model": "gemini-3-pro-preview",
+    "outline_prompt": "outline_prompt.txt",
+    "image_prompt": "image_prompt.txt",
+    "aspect_ratio": "3:4",
+    "resolution": "1K",
+    "parallel": 2,
+
+    "_comment": "以下为 Vertex AI 模式配置（与 api_key 二选一）",
+    "vertex": false,
+    "project": "your-gcp-project-id",
+    "location": "us-central1",
+    "credentials": "path/to/service-account.json"
+}
