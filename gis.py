@@ -73,9 +73,7 @@ class ClientConfig:
                     api_key=self.api_key,
                     http_options=types.HttpOptions(base_url=self.base_url),
                 )
-        except FileNotFoundError:
-            raise
-        except ValueError:
+        except (FileNotFoundError, ValueError):
             raise
         except Exception as e:
             raise RuntimeError(f"Failed to create GenAI client: {e}") from e
@@ -130,6 +128,7 @@ def generate_outline(
     if hasattr(response, 'candidates') and response.candidates:
         for candidate in response.candidates:
             if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                # finish_reason can be string ('STOP', 'MAX_TOKENS') or int (1 = STOP in protobuf enum)
                 if candidate.finish_reason not in ('STOP', 'MAX_TOKENS', 1):
                     logging.warning(f"大纲生成可能被截断或过滤: finish_reason={candidate.finish_reason}")
 
@@ -149,7 +148,7 @@ def parse_outline(outline_text: str) -> list[PageInfo]:
     pages = []
     page_type_pattern = re.compile(r"^\s*\[([^\]]+)\]", re.MULTILINE)
 
-    for idx, raw_content in enumerate(raw_pages):
+    for raw_content in raw_pages:
         content = raw_content.strip()
         if not content:
             continue
@@ -213,13 +212,16 @@ def generate_one_page(
 
         # Build contents with reference images
         contents = [final_prompt]
+        opened_images = []  # Track opened images for cleanup
 
         # Add style reference image if provided
         if style_image_path:
             style_path = Path(style_image_path)
             if style_path.exists():
                 try:
-                    contents.append(Image.open(style_path))
+                    img = Image.open(style_path)
+                    opened_images.append(img)
+                    contents.append(img)
                 except (OSError, IOError) as e:
                     logging.warning(f"无法打开风格参考图 {style_image_path}: {e}")
             else:
@@ -230,7 +232,9 @@ def generate_one_page(
             cover_path = Path(cover_image_path)
             if cover_path.exists():
                 try:
-                    contents.append(Image.open(cover_path))
+                    img = Image.open(cover_path)
+                    opened_images.append(img)
+                    contents.append(img)
                 except (OSError, IOError) as e:
                     logging.warning(f"无法打开封面参考图 {cover_image_path}: {e}")
             else:
@@ -250,6 +254,9 @@ def generate_one_page(
         except Exception as e:
             logging.error(f"图像生成 API 调用失败 (Page{page.index}): {e}")
             return False
+        finally:
+            for img in opened_images:
+                img.close()
 
         if response is None:
             logging.error(f"API 返回空响应 (Page{page.index})")
@@ -287,6 +294,7 @@ def generate_one_page(
 
         if not image_saved:
             logging.warning(f"Page{page.index} 没有生成图片")
+            return False
 
         logging.info(f"完成 Page{page.index}")
         return True
@@ -340,11 +348,14 @@ def generate_cover_page(
 
         # Build contents with optional style reference image
         contents = [final_prompt]
+        opened_images = []  # Track opened images for cleanup
         if style_image_path:
             style_path = Path(style_image_path)
             if style_path.exists():
                 try:
-                    contents.append(Image.open(style_path))
+                    img = Image.open(style_path)
+                    opened_images.append(img)
+                    contents.append(img)
                 except (OSError, IOError) as e:
                     logging.warning(f"无法打开风格参考图 {style_image_path}: {e}，继续生成...")
             else:
@@ -364,6 +375,9 @@ def generate_cover_page(
         except Exception as e:
             logging.error(f"封面图像生成 API 调用失败: {e}")
             return None
+        finally:
+            for img in opened_images:
+                img.close()
 
         if response is None:
             logging.error("封面生成 API 返回空响应")
@@ -560,6 +574,8 @@ def main() -> None:
     resolution = resolve(args.resolution, "resolution", "GIS_RESOLUTION", DEFAULT_RESOLUTION)
     parallel_str = resolve(args.parallel, "parallel", "GIS_PARALLEL", DEFAULT_PARALLEL)
     parallel = int(parallel_str) if isinstance(parallel_str, str) else parallel_str
+    if parallel < 1:
+        parser.error(f"--parallel must be at least 1, got {parallel}")
     # Vertex AI settings
     vertex_env = os.environ.get("GIS_VERTEX", "").lower() in ("true", "1", "yes")
     vertex = args.vertex if args.vertex is not None else config.get("vertex", vertex_env)
@@ -624,17 +640,22 @@ def main() -> None:
     if not image_prompt_template.strip():
         parser.error(f"Image prompt file is empty: {image_prompt_path}")
 
-    # Validate reference image if provided
+    # Validate reference image if provided (check is_file before logger setup)
+    ref_image_missing = False
     if ref_image:
         ref_image_path = Path(ref_image)
         if not ref_image_path.exists():
-            logging.warning(f"Reference image not found: {ref_image}")
+            ref_image_missing = True
         elif not ref_image_path.is_file():
             parser.error(f"Reference image path is not a file: {ref_image}")
 
     # Setup logging (log file goes to output directory)
     log_file = output_dir / "gen.log"
     setup_logger(log_file)
+
+    # Log reference image warning after logger is configured
+    if ref_image_missing:
+        logging.warning(f"Reference image not found: {ref_image}")
 
     logging.info(f"主题: {topic}")
     logging.info(f"文本模型: {text_model}")
@@ -724,7 +745,7 @@ def main() -> None:
     # Step 4: Generate remaining pages in parallel
     remaining_pages = [p for p in pages if p.index != cover_page.index]
     failed_pages = []
-    success_count = 1  # Cover page already processed
+    success_count = 1 if cover_image_path else 0  # Count cover only if it succeeded
 
     if remaining_pages:
         worker = partial(
