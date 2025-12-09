@@ -7,8 +7,10 @@ import os
 import re
 import sys
 import multiprocessing
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 try:
     from llm import ClientConfig, generate_text, generate_image, DEFAULT_BASE_URL, DEFAULT_LOCATION
@@ -23,7 +25,6 @@ DEFAULT_TEXT_MODEL = "gemini-3-pro-preview"
 DEFAULT_PARALLEL = 2
 
 
-from dataclasses import dataclass
 
 @dataclass
 class PageInfo:
@@ -33,7 +34,70 @@ class PageInfo:
     content: str
 
 
+def parse_bool(value: Any) -> bool:
+    """Parse a value as boolean.
+    
+    Accepts bool, or string values like 'true', '1', 'yes' (case-insensitive).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def resolve_config(
+    cli_value: Any,
+    config: dict,
+    config_key: str,
+    env_key: str,
+    default: Any = None,
+) -> Any:
+    """Resolve a configuration value with priority: CLI > config file > env var > default.
+    
+    Args:
+        cli_value: Value from command line argument
+        config: Configuration dictionary from config file
+        config_key: Key to look up in config dictionary
+        env_key: Environment variable name
+        default: Default value if none of the above are set
+    
+    Returns:
+        Resolved configuration value
+    """
+    if cli_value is not None:
+        return cli_value
+    if config_key in config:
+        return config[config_key]
+    env_value = os.environ.get(env_key)
+    if env_value is not None:
+        return env_value
+    return default
+
+
 def setup_logger(log_file: Path) -> None:
+    """Configure logging to output to both file and console."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+
+
+def _init_worker(log_file: Path) -> None:
+    """Initialize worker process logging.
+    
+    On Windows, multiprocessing uses 'spawn' which doesn't inherit
+    the parent's logging configuration. This initializer ensures
+    each worker process has proper logging setup.
+    """
+    # Reset logging configuration for this process
+    root = logging.getLogger()
+    root.handlers.clear()
+    
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -393,14 +457,7 @@ def main() -> None:
 
     # Helper function to resolve value with priority: CLI > config > env > default
     def resolve(cli_value, config_key: str, env_key: str, default=None):
-        if cli_value is not None:
-            return cli_value
-        if config_key in config:
-            return config[config_key]
-        env_value = os.environ.get(env_key)
-        if env_value is not None:
-            return env_value
-        return default
+        return resolve_config(cli_value, config, config_key, env_key, default)
 
     # Resolve all settings with priority: CLI > config > env > default
     topic = resolve(args.topic, "topic", "GIS_TOPIC")
@@ -413,13 +470,19 @@ def main() -> None:
     image_prompt_path = resolve(args.image_prompt, "image_prompt", "GIS_IMAGE_PROMPT")
     aspect_ratio = resolve(args.aspect_ratio, "aspect_ratio", "GIS_ASPECT_RATIO", DEFAULT_ASPECT_RATIO)
     resolution = resolve(args.resolution, "resolution", "GIS_RESOLUTION", DEFAULT_RESOLUTION)
+    
+    # Parse parallel with explicit error handling for invalid values
     parallel_str = resolve(args.parallel, "parallel", "GIS_PARALLEL", DEFAULT_PARALLEL)
-    parallel = int(parallel_str) if isinstance(parallel_str, str) else parallel_str
+    try:
+        parallel = int(parallel_str) if isinstance(parallel_str, str) else parallel_str
+    except ValueError:
+        parser.error(f"--parallel must be a valid integer, got: {parallel_str}")
     if parallel < 1:
         parser.error(f"--parallel must be at least 1, got {parallel}")
-    # Vertex AI settings
-    vertex_env = os.environ.get("GIS_VERTEX", "").lower() in ("true", "1", "yes")
-    vertex = args.vertex if args.vertex is not None else config.get("vertex", vertex_env)
+    
+    # Vertex AI settings - use parse_bool for consistent boolean handling
+    vertex_raw = resolve(args.vertex, "vertex", "GIS_VERTEX", False)
+    vertex = parse_bool(vertex_raw)
     project = resolve(args.project, "project", "GIS_PROJECT")
     location = resolve(args.location, "location", "GIS_LOCATION", DEFAULT_LOCATION)
     credentials = resolve(args.credentials, "credentials", "GOOGLE_APPLICATION_CREDENTIALS")
@@ -604,7 +667,11 @@ def main() -> None:
         )
 
         try:
-            with multiprocessing.Pool(processes=parallel) as pool:
+            with multiprocessing.Pool(
+                processes=parallel,
+                initializer=_init_worker,
+                initargs=(log_file,),
+            ) as pool:
                 try:
                     results = list(zip(remaining_pages, pool.imap(worker, remaining_pages)))
                     for page, success in results:

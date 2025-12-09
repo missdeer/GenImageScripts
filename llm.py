@@ -10,8 +10,20 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
+__all__ = [
+    "ClientConfig",
+    "generate_text",
+    "generate_image",
+    "DEFAULT_BASE_URL",
+    "DEFAULT_LOCATION",
+]
+
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 DEFAULT_LOCATION = "us-central1"
+
+# Protobuf enum value for STOP finish reason
+# Used when API returns integer instead of string
+FINISH_REASON_STOP = 1
 
 
 @dataclass
@@ -82,23 +94,23 @@ def generate_text(
             contents=[prompt],
         )
     except Exception as e:
-        logging.error(f"Text generation API call failed: {e}")
-        raise RuntimeError(f"Failed to generate text: {e}") from e
+        logging.error(f"文本生成 API 调用失败: {e}")
+        raise RuntimeError(f"文本生成失败: {e}") from e
 
     if response is None:
-        raise RuntimeError("API returned None response for text generation")
+        raise RuntimeError("文本生成 API 返回空响应")
 
     # Check for blocked content or safety filters
     if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
         if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
-            raise RuntimeError(f"Prompt was blocked: {response.prompt_feedback.block_reason}")
+            raise RuntimeError(f"提示词被阻止: {response.prompt_feedback.block_reason}")
 
     if hasattr(response, 'candidates') and response.candidates:
         for candidate in response.candidates:
             if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
-                # finish_reason can be string ('STOP', 'MAX_TOKENS') or int (1 = STOP in protobuf enum)
-                if candidate.finish_reason not in ('STOP', 'MAX_TOKENS', 1):
-                    logging.warning(f"Text generation may be truncated or filtered: finish_reason={candidate.finish_reason}")
+                # finish_reason can be string ('STOP', 'MAX_TOKENS') or int (FINISH_REASON_STOP in protobuf enum)
+                if candidate.finish_reason not in ('STOP', 'MAX_TOKENS', FINISH_REASON_STOP):
+                    logging.warning(f"文本生成可能被截断或过滤: finish_reason={candidate.finish_reason}")
 
     text = response.text if response.text else ""
     return text
@@ -140,9 +152,9 @@ def generate_image(
                     opened_images.append(img)
                     contents.append(img)
                 except (OSError, IOError) as e:
-                    logging.warning(f"Failed to open reference image {img_path}: {e}")
+                    logging.warning(f"无法打开参考图片 {img_path}: {e}")
             else:
-                logging.warning(f"Reference image not found: {img_path}")
+                logging.warning(f"参考图片不存在: {img_path}")
 
     try:
         response = client.models.generate_content(
@@ -156,19 +168,26 @@ def generate_image(
             ),
         )
     except Exception as e:
-        logging.error(f"Image generation API call failed: {e}")
-        raise RuntimeError(f"Failed to generate image: {e}") from e
+        logging.error(f"图像生成 API 调用失败: {e}")
+        raise RuntimeError(f"图像生成失败: {e}") from e
     finally:
         for img in opened_images:
             img.close()
 
     if response is None:
-        raise RuntimeError("API returned None response for image generation")
+        raise RuntimeError("图像生成 API 返回空响应")
 
     # Check for safety/content filtering
     if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
         if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
-            raise RuntimeError(f"Prompt was blocked: {response.prompt_feedback.block_reason}")
+            raise RuntimeError(f"提示词被阻止: {response.prompt_feedback.block_reason}")
+
+    # Check for candidates finish reason (similar to generate_text)
+    if hasattr(response, 'candidates') and response.candidates:
+        for candidate in response.candidates:
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                if candidate.finish_reason not in ('STOP', 'MAX_TOKENS', FINISH_REASON_STOP):
+                    logging.warning(f"图像生成可能不完整或被过滤: finish_reason={candidate.finish_reason}")
 
     result_image = None
     result_text = None
@@ -179,6 +198,8 @@ def generate_image(
             if part.text is not None:
                 texts.append(part.text)
             elif image := part.as_image():
+                # Note: If the response contains multiple images, only the last one is retained.
+                # This is intentional as we expect single image generation per request.
                 result_image = image
 
         if texts:
