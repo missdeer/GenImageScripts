@@ -13,15 +13,18 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from src import ClientConfig, generate_text, generate_image, DEFAULT_BASE_URL, DEFAULT_LOCATION
+    from src import get_api_service, OPENAI_AVAILABLE
 except ImportError as e:
     print(f"Error: Failed to import src module: {e}")
     sys.exit(1)
 
+DEFAULT_BACKEND = "gemini"  # "gemini" or "openai"
 DEFAULT_ASPECT_RATIO = "3:4"  # "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 DEFAULT_RESOLUTION = "1K"  # "1K", "2K", "4K"
-DEFAULT_IMAGE_MODEL = "gemini-3-image-pro-preview"
-DEFAULT_TEXT_MODEL = "gemini-3-pro-preview"
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-image-pro-preview"
+DEFAULT_GEMINI_TEXT_MODEL = "gemini-3-pro-preview"
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
+DEFAULT_OPENAI_TEXT_MODEL = "gpt-4o"
 DEFAULT_PARALLEL = 2
 
 
@@ -113,12 +116,13 @@ def generate_outline(
     text_model: str,
     outline_prompt: str,
     user_topic: str,
+    generate_text_fn,
 ) -> str:
     """Generate outline using the text model."""
     final_prompt = outline_prompt.replace("{topic}", user_topic)
 
     logging.info("正在使用文本模型生成大纲...")
-    outline_text = generate_text(client, text_model, final_prompt)
+    outline_text = generate_text_fn(client, text_model, final_prompt)
 
     if not outline_text.strip():
         logging.warning("大纲生成结果为空")
@@ -159,7 +163,7 @@ def parse_outline(outline_text: str) -> list[PageInfo]:
 
 def _generate_page_image(
     page: PageInfo,
-    client_config: ClientConfig,
+    client_config: Any,
     image_model: str,
     image_prompt_template: str,
     user_topic: str,
@@ -167,6 +171,7 @@ def _generate_page_image(
     aspect_ratio: str,
     resolution: str,
     output_dir: Path,
+    generate_image_fn,
     ref_images: list[Path] | None = None,
 ) -> str | None:
     """Generate image for a page (internal helper).
@@ -181,6 +186,7 @@ def _generate_page_image(
         aspect_ratio: Image aspect ratio
         resolution: Image resolution
         output_dir: Output directory
+        generate_image_fn: Function to generate image
         ref_images: Optional list of reference image paths
 
     Returns:
@@ -212,7 +218,7 @@ def _generate_page_image(
         return None
 
     try:
-        result_image, result_text = generate_image(
+        result_image, result_text = generate_image_fn(
             client, image_model, final_prompt,
             reference_images=ref_images,
             aspect_ratio=aspect_ratio,
@@ -249,7 +255,7 @@ def generate_one_page(
     page: PageInfo,
     style_image_path: str | None,
     cover_image_path: str | None,
-    client_config: ClientConfig,
+    client_config: Any,
     image_model: str,
     image_prompt_template: str,
     user_topic: str,
@@ -257,6 +263,7 @@ def generate_one_page(
     aspect_ratio: str,
     resolution: str,
     output_dir: Path,
+    generate_image_fn,
 ) -> bool:
     """Generate image for a single page.
 
@@ -281,6 +288,7 @@ def generate_one_page(
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             output_dir=output_dir,
+            generate_image_fn=generate_image_fn,
             ref_images=ref_images if ref_images else None,
         )
         return result is not None
@@ -296,7 +304,7 @@ def generate_one_page(
 def generate_cover_page(
     page: PageInfo,
     style_image_path: str | None,
-    client_config: ClientConfig,
+    client_config: Any,
     image_model: str,
     image_prompt_template: str,
     user_topic: str,
@@ -304,6 +312,7 @@ def generate_cover_page(
     aspect_ratio: str,
     resolution: str,
     output_dir: Path,
+    generate_image_fn,
 ) -> str | None:
     """Generate cover page image and return its path.
 
@@ -323,6 +332,7 @@ def generate_cover_page(
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             output_dir=output_dir,
+            generate_image_fn=generate_image_fn,
             ref_images=ref_images,
         )
 
@@ -336,7 +346,7 @@ def generate_cover_page(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate PPT/小红书 page images using Gemini/Nano Banana Pro or any other AI image generation API"
+        description="Generate PPT/小红书 page images using Gemini or OpenAI-compatible API"
     )
     parser.add_argument(
         "topic",
@@ -345,14 +355,20 @@ def main() -> None:
         help="The topic/requirement for generating content (env: GIS_TOPIC)"
     )
     parser.add_argument(
+        "-b", "--backend",
+        default=None,
+        choices=["gemini", "openai"],
+        help=f"Backend to use for API calls (env: GIS_BACKEND, default: {DEFAULT_BACKEND})"
+    )
+    parser.add_argument(
         "-k", "--api-key",
         default=None,
-        help="Gemini API key (env: GEMINI_API_KEY)"
+        help="API key (env: GEMINI_API_KEY for gemini, OPENAI_API_KEY for openai)"
     )
     parser.add_argument(
         "-u", "--base-url",
         default=None,
-        help="API base URL (env: GEMINI_BASE_URL)"
+        help="API base URL (env: GEMINI_BASE_URL for gemini, OPENAI_BASE_URL for openai)"
     )
     parser.add_argument(
         "-r", "--ref-image",
@@ -362,12 +378,12 @@ def main() -> None:
     parser.add_argument(
         "-i", "--image-model",
         default=None,
-        help="Gemini image model name (env: GEMINI_IMAGE_MODEL)"
+        help="Image model name (env: GIS_IMAGE_MODEL, backend-specific defaults apply)"
     )
     parser.add_argument(
         "-t", "--text-model",
         default=None,
-        help="Gemini text model name (env: GEMINI_TEXT_MODEL)"
+        help="Text model name (env: GIS_TEXT_MODEL, backend-specific defaults apply)"
     )
     parser.add_argument(
         "-o", "--outline-prompt",
@@ -417,7 +433,7 @@ def main() -> None:
     parser.add_argument(
         "--location",
         default=None,
-        help=f"Google Cloud location for Vertex AI (env: GIS_LOCATION, default: {DEFAULT_LOCATION})"
+        help="Google Cloud location for Vertex AI (env: GIS_LOCATION, default: us-central1)"
     )
     parser.add_argument(
         "--credentials",
@@ -459,18 +475,42 @@ def main() -> None:
     def resolve(cli_value, config_key: str, env_key: str, default=None):
         return resolve_config(cli_value, config, config_key, env_key, default)
 
+    # Resolve backend first (it affects other defaults)
+    backend = resolve(args.backend, "backend", "GIS_BACKEND", DEFAULT_BACKEND)
+    if backend not in ("gemini", "openai"):
+        parser.error(f"--backend must be 'gemini' or 'openai', got: {backend}")
+
+    # Check OpenAI availability if selected
+    if backend == "openai" and not OPENAI_AVAILABLE:
+        parser.error("OpenAI backend selected but 'openai' package is not installed. "
+                     "Install it with: pip install openai")
+
+    # Get backend-specific configuration and functions
+    try:
+        api_service = get_api_service(backend)
+    except ValueError as e:
+        parser.error(str(e))
+
     # Resolve all settings with priority: CLI > config > env > default
     topic = resolve(args.topic, "topic", "GIS_TOPIC")
-    api_key = resolve(args.api_key, "api_key", "GEMINI_API_KEY")
-    base_url = resolve(args.base_url, "base_url", "GEMINI_BASE_URL", DEFAULT_BASE_URL)
     ref_image = resolve(args.ref_image, "ref_image", "GIS_REF_IMAGE")
-    image_model = resolve(args.image_model, "image_model", "GEMINI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)
-    text_model = resolve(args.text_model, "text_model", "GEMINI_TEXT_MODEL", DEFAULT_TEXT_MODEL)
     outline_prompt_path = resolve(args.outline_prompt, "outline_prompt", "GIS_OUTLINE_PROMPT")
     image_prompt_path = resolve(args.image_prompt, "image_prompt", "GIS_IMAGE_PROMPT")
     aspect_ratio = resolve(args.aspect_ratio, "aspect_ratio", "GIS_ASPECT_RATIO", DEFAULT_ASPECT_RATIO)
     resolution = resolve(args.resolution, "resolution", "GIS_RESOLUTION", DEFAULT_RESOLUTION)
-    
+
+    # Backend-specific settings
+    if backend == "gemini":
+        api_key = resolve(args.api_key, "api_key", "GEMINI_API_KEY")
+        base_url = resolve(args.base_url, "base_url", "GEMINI_BASE_URL", api_service.default_base_url)
+        image_model = resolve(args.image_model, "image_model", "GIS_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
+        text_model = resolve(args.text_model, "text_model", "GIS_TEXT_MODEL", DEFAULT_GEMINI_TEXT_MODEL)
+    else:  # openai
+        api_key = resolve(args.api_key, "api_key", "OPENAI_API_KEY")
+        base_url = resolve(args.base_url, "base_url", "OPENAI_BASE_URL", api_service.default_base_url)
+        image_model = resolve(args.image_model, "image_model", "GIS_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL)
+        text_model = resolve(args.text_model, "text_model", "GIS_TEXT_MODEL", DEFAULT_OPENAI_TEXT_MODEL)
+
     # Parse parallel with explicit error handling for invalid values
     parallel_str = resolve(args.parallel, "parallel", "GIS_PARALLEL", DEFAULT_PARALLEL)
     try:
@@ -480,25 +520,31 @@ def main() -> None:
     if parallel < 1:
         parser.error(f"--parallel must be at least 1, got {parallel}")
     
-    # Vertex AI settings - use parse_bool for consistent boolean handling
+    # Vertex AI settings (only for Gemini backend) - use parse_bool for consistent boolean handling
     vertex_raw = resolve(args.vertex, "vertex", "GIS_VERTEX", False)
     vertex = parse_bool(vertex_raw)
     project = resolve(args.project, "project", "GIS_PROJECT")
-    location = resolve(args.location, "location", "GIS_LOCATION", DEFAULT_LOCATION)
+    location = resolve(args.location, "location", "GIS_LOCATION", api_service.default_location or "us-central1")
     credentials = resolve(args.credentials, "credentials", "GOOGLE_APPLICATION_CREDENTIALS")
     output_directory = resolve(args.output_directory, "output_directory", "GIS_OUTPUT_DIRECTORY", ".")
 
     # Validate required parameters
     if not topic:
         parser.error("topic is required (provide as argument, in config file, or via GIS_TOPIC env var)")
-    if vertex:
-        # Vertex AI mode requires project
-        if not project:
-            parser.error("--project is required for Vertex AI mode (or set in config file or GIS_PROJECT env var)")
-    else:
-        # API key mode requires api_key
+    
+    if backend == "gemini":
+        if vertex:
+            # Vertex AI mode requires project
+            if not project:
+                parser.error("--project is required for Vertex AI mode (or set in config file or GIS_PROJECT env var)")
+        else:
+            # API key mode requires api_key
+            if not api_key:
+                parser.error("--api-key is required (or set in config file or GEMINI_API_KEY env var)")
+    else:  # openai
         if not api_key:
-            parser.error("--api-key is required (or set in config file or GEMINI_API_KEY env var)")
+            parser.error("--api-key is required for OpenAI backend (or set in config file or OPENAI_API_KEY env var)")
+
     # ref_image is optional - if not provided, cover generates freely,
     # and subsequent pages use cover as reference
     if not outline_prompt_path:
@@ -562,25 +608,35 @@ def main() -> None:
         logging.warning(f"Reference image not found: {ref_image}")
 
     logging.info(f"主题: {topic}")
+    logging.info(f"后端: {backend}")
     logging.info(f"文本模型: {text_model}")
     logging.info(f"图像模型: {image_model}")
-    if vertex:
-        logging.info(f"使用 Vertex AI 模式 (project: {project}, location: {location})")
-    else:
-        logging.info(f"使用 API Key 模式 (base_url: {base_url})")
+    if backend == "gemini":
+        if vertex:
+            logging.info(f"使用 Vertex AI 模式 (project: {project}, location: {location})")
+        else:
+            logging.info(f"使用 API Key 模式 (base_url: {base_url})")
+    else:  # openai
+        logging.info(f"使用 OpenAI API (base_url: {base_url})")
     logging.info(f"输出目录: {output_dir.absolute()}")
 
-    # Create client configuration
-    client_config = ClientConfig(
-        api_key=api_key,
-        base_url=base_url,
-        vertex=vertex,
-        project=project,
-        location=location,
-        credentials=credentials,
-    )
+    # Create client configuration based on backend
+    if backend == "gemini":
+        client_config = api_service.config_class(
+            api_key=api_key,
+            base_url=base_url,
+            vertex=vertex,
+            project=project,
+            location=location,
+            credentials=credentials,
+        )
+    else:  # openai
+        client_config = api_service.config_class(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
-    # Create Gemini client for outline generation
+    # Create API client for outline generation
     try:
         client = client_config.create_client()
     except FileNotFoundError as e:
@@ -595,7 +651,9 @@ def main() -> None:
 
     # Step 1: Generate outline using text model
     try:
-        full_outline = generate_outline(client, text_model, outline_prompt, topic)
+        full_outline = generate_outline(
+            client, text_model, outline_prompt, topic, api_service.generate_text
+        )
     except RuntimeError as e:
         logging.error(f"生成大纲失败: {e}")
         sys.exit(1)
@@ -638,6 +696,7 @@ def main() -> None:
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             output_dir=output_dir,
+            generate_image_fn=api_service.generate_image,
         )
     except KeyboardInterrupt:
         logging.warning("封面生成被用户中断，程序退出")
@@ -664,6 +723,7 @@ def main() -> None:
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             output_dir=output_dir,
+            generate_image_fn=api_service.generate_image,
         )
 
         try:
