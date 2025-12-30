@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from llm import ClientConfig, generate_text, generate_image, DEFAULT_BASE_URL, DEFAULT_LOCATION
+    from src import ClientConfig, generate_text, generate_image, DEFAULT_BASE_URL, DEFAULT_LOCATION
 except ImportError as e:
-    print(f"Error: Failed to import llm module: {e}")
+    print(f"Error: Failed to import src module: {e}")
     sys.exit(1)
 
 DEFAULT_ASPECT_RATIO = "3:4"  # "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""LLM client utilities for text and image generation using Google GenAI."""
+"""Google GenAI (Gemini) client utilities for text and image generation."""
 
 import logging
 import os
@@ -11,7 +11,7 @@ from google.genai import types
 from PIL import Image
 
 __all__ = [
-    "ClientConfig",
+    "GeminiConfig",
     "generate_text",
     "generate_image",
     "DEFAULT_BASE_URL",
@@ -27,8 +27,8 @@ FINISH_REASON_STOP = 1
 
 
 @dataclass
-class ClientConfig:
-    """Configuration for creating GenAI client."""
+class GeminiConfig:
+    """Configuration for creating Google GenAI (Gemini) client."""
     # API Key mode
     api_key: str | None = None
     base_url: str = DEFAULT_BASE_URL
