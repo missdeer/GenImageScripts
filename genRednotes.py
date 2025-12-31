@@ -21,10 +21,8 @@ except ImportError as e:
 DEFAULT_API_SERVICE = "gemini"  # "gemini" or "openai"
 DEFAULT_ASPECT_RATIO = "3:4"  # "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 DEFAULT_RESOLUTION = "1K"  # "1K", "2K", "4K"
-DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-image-pro-preview"
-DEFAULT_GEMINI_TEXT_MODEL = "gemini-3-pro-preview"
-DEFAULT_OPENAI_IMAGE_MODEL = "gemini-3-image-pro"
-DEFAULT_OPENAI_TEXT_MODEL = "gpt-5.2"
+DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview"
+DEFAULT_TEXT_MODEL = "gemini-3-pro-preview"
 DEFAULT_PARALLEL = 2
 
 
@@ -494,17 +492,17 @@ def main() -> None:
     aspect_ratio = resolve(args.aspect_ratio, "aspect_ratio", "GRN_ASPECT_RATIO", DEFAULT_ASPECT_RATIO)
     resolution = resolve(args.resolution, "resolution", "GRN_RESOLUTION", DEFAULT_RESOLUTION)
 
+    # Unified model settings
+    image_model = resolve(args.image_model, "image_model", "GRN_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)
+    text_model = resolve(args.text_model, "text_model", "GRN_TEXT_MODEL", DEFAULT_TEXT_MODEL)
+
     # Service-specific settings
     if api_service_name == "gemini":
         api_key = resolve(args.api_key, "api_key", "GEMINI_API_KEY")
         base_url = resolve(args.base_url, "base_url", "GEMINI_BASE_URL", api_service.default_base_url)
-        image_model = resolve(args.image_model, "image_model", "GRN_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
-        text_model = resolve(args.text_model, "text_model", "GRN_TEXT_MODEL", DEFAULT_GEMINI_TEXT_MODEL)
     else:  # openai
         api_key = resolve(args.api_key, "api_key", "OPENAI_API_KEY")
         base_url = resolve(args.base_url, "base_url", "OPENAI_BASE_URL", api_service.default_base_url)
-        image_model = resolve(args.image_model, "image_model", "GRN_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL)
-        text_model = resolve(args.text_model, "text_model", "GRN_TEXT_MODEL", DEFAULT_OPENAI_TEXT_MODEL)
 
     # Parse parallel with explicit error handling for invalid values
     parallel_str = resolve(args.parallel, "parallel", "GRN_PARALLEL", DEFAULT_PARALLEL)
