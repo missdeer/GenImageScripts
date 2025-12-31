@@ -14,27 +14,27 @@ python gis.py "主题" [选项...]
 
 | 参数 | 简写 | 环境变量 | 默认值 | 说明 |
 |------|------|----------|--------|------|
-| `topic` | - | `GIS_TOPIC` | 必填 | 生成内容的主题（位置参数） |
+| `topic` | - | `GRN_TOPIC` | 必填 | 生成内容的主题（位置参数） |
 | `--api-key` | `-k` | `GEMINI_API_KEY` | 必填* | Gemini API 密钥 |
 | `--base-url` | `-u` | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | API 基础 URL |
-| `--ref-image` | `-r` | `GIS_REF_IMAGE` | - | 参考风格图片路径（可选，不提供时封面自由生成，后续页面以封面为参考） |
+| `--ref-image` | `-r` | `GRN_REF_IMAGE` | - | 参考风格图片路径（可选，不提供时封面自由生成，后续页面以封面为参考） |
 | `--image-model` | `-i` | `GEMINI_IMAGE_MODEL` | `gemini-3-image-pro-preview` | 图像生成模型名称 |
 | `--text-model` | `-t` | `GEMINI_TEXT_MODEL` | `gemini-3-pro-preview` | 文本生成模型名称 |
-| `--outline-prompt` | `-o` | `GIS_OUTLINE_PROMPT` | 必填 | 大纲提示词模板文件路径 |
-| `--image-prompt` | `-p` | `GIS_IMAGE_PROMPT` | 必填 | 图片提示词模板文件路径 |
-| `--aspect-ratio` | `-a` | `GIS_ASPECT_RATIO` | `3:4` | 图片比例 |
-| `--resolution` | `-s` | `GIS_RESOLUTION` | `1K` | 图片分辨率 |
-| `--config` | `-c` | `GIS_CONFIG` | - | JSON 配置文件路径 |
-| `--parallel` | `-j` | `GIS_PARALLEL` | `2` | 并行生成图片的进程数 |
-| `--output-directory` | `-d` | `GIS_OUTPUT_DIRECTORY` | `.` | 输出文件目录（存放 .txt 和 .png 文件） |
+| `--outline-prompt` | `-o` | `GRN_OUTLINE_PROMPT` | 必填 | 大纲提示词模板文件路径 |
+| `--image-prompt` | `-p` | `GRN_IMAGE_PROMPT` | 必填 | 图片提示词模板文件路径 |
+| `--aspect-ratio` | `-a` | `GRN_ASPECT_RATIO` | `3:4` | 图片比例 |
+| `--resolution` | `-s` | `GRN_RESOLUTION` | `1K` | 图片分辨率 |
+| `--config` | `-c` | `GRN_CONFIG` | - | JSON 配置文件路径 |
+| `--parallel` | `-j` | `GRN_PARALLEL` | `2` | 并行生成图片的进程数 |
+| `--output-directory` | `-d` | `GRN_OUTPUT_DIRECTORY` | `.` | 输出文件目录（存放 .txt 和 .png 文件） |
 
 ### Vertex AI 参数
 
 | 参数 | 环境变量 | 默认值 | 说明 |
 |------|----------|--------|------|
-| `--vertex` | `GIS_VERTEX` | `false` | 启用 Vertex AI 模式 |
-| `--project` | `GIS_PROJECT` | 必填* | Google Cloud 项目 ID |
-| `--location` | `GIS_LOCATION` | `us-central1` | Google Cloud 区域 |
+| `--vertex` | `GRN_VERTEX` | `false` | 启用 Vertex AI 模式 |
+| `--project` | `GRN_PROJECT` | 必填* | Google Cloud 项目 ID |
+| `--location` | `GRN_LOCATION` | `us-central1` | Google Cloud 区域 |
 | `--credentials` | `GOOGLE_APPLICATION_CREDENTIALS` | - | 服务账号 JSON 密钥文件路径 |
 
 ### 两种认证模式对比
@@ -103,16 +103,16 @@ python gis.py "Python入门教程" -k YOUR_API_KEY -r style.png -o outline.txt -
 ```bash
 # Windows
 set GEMINI_API_KEY=your-api-key
-set GIS_REF_IMAGE=style.png
-set GIS_OUTLINE_PROMPT=outline.txt
-set GIS_IMAGE_PROMPT=image.txt
+set GRN_REF_IMAGE=style.png
+set GRN_OUTLINE_PROMPT=outline.txt
+set GRN_IMAGE_PROMPT=image.txt
 python gis.py "Python入门教程"
 
 # Linux/macOS
 export GEMINI_API_KEY=your-api-key
-export GIS_REF_IMAGE=style.png
-export GIS_OUTLINE_PROMPT=outline.txt
-export GIS_IMAGE_PROMPT=image.txt
+export GRN_REF_IMAGE=style.png
+export GRN_OUTLINE_PROMPT=outline.txt
+export GRN_IMAGE_PROMPT=image.txt
 python gis.py "Python入门教程"
 ```
 
@@ -121,7 +121,7 @@ python gis.py "Python入门教程"
 ```bash
 # 环境变量设置通用配置
 set GEMINI_API_KEY=your-api-key
-set GIS_REF_IMAGE=style.png
+set GRN_REF_IMAGE=style.png
 
 # 命令行覆盖特定参数
 python gis.py "主题" -o outline.txt -p image.txt -a 16:9

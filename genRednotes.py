@@ -18,13 +18,13 @@ except ImportError as e:
     print(f"Error: Failed to import src module: {e}")
     sys.exit(1)
 
-DEFAULT_BACKEND = "gemini"  # "gemini" or "openai"
+DEFAULT_API_SERVICE = "gemini"  # "gemini" or "openai"
 DEFAULT_ASPECT_RATIO = "3:4"  # "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 DEFAULT_RESOLUTION = "1K"  # "1K", "2K", "4K"
 DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-image-pro-preview"
 DEFAULT_GEMINI_TEXT_MODEL = "gemini-3-pro-preview"
-DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
-DEFAULT_OPENAI_TEXT_MODEL = "gpt-4o"
+DEFAULT_OPENAI_IMAGE_MODEL = "gemini-3-image-pro"
+DEFAULT_OPENAI_TEXT_MODEL = "gpt-5.2"
 DEFAULT_PARALLEL = 2
 
 
@@ -352,13 +352,13 @@ def main() -> None:
         "topic",
         nargs="?",
         default=None,
-        help="The topic/requirement for generating content (env: GIS_TOPIC)"
+        help="The topic/requirement for generating content (env: GRN_TOPIC)"
     )
     parser.add_argument(
-        "-b", "--backend",
+        "-b", "--api-service",
         default=None,
         choices=["gemini", "openai"],
-        help=f"Backend to use for API calls (env: GIS_BACKEND, default: {DEFAULT_BACKEND})"
+        help=f"API service to use for API calls (env: GRN_API_SERVICE, default: {DEFAULT_API_SERVICE})"
     )
     parser.add_argument(
         "-k", "--api-key",
@@ -373,67 +373,67 @@ def main() -> None:
     parser.add_argument(
         "-r", "--ref-image",
         default=None,
-        help="Path to the reference style image (env: GIS_REF_IMAGE)"
+        help="Path to the reference style image (env: GRN_REF_IMAGE)"
     )
     parser.add_argument(
         "-i", "--image-model",
         default=None,
-        help="Image model name (env: GIS_IMAGE_MODEL, backend-specific defaults apply)"
+        help="Image model name (env: GRN_IMAGE_MODEL, service-specific defaults apply)"
     )
     parser.add_argument(
         "-t", "--text-model",
         default=None,
-        help="Text model name (env: GIS_TEXT_MODEL, backend-specific defaults apply)"
+        help="Text model name (env: GRN_TEXT_MODEL, service-specific defaults apply)"
     )
     parser.add_argument(
         "-o", "--outline-prompt",
         default=None,
-        help="Path to a file containing the outline prompt template (env: GIS_OUTLINE_PROMPT)"
+        help="Path to a file containing the outline prompt template (env: GRN_OUTLINE_PROMPT)"
     )
     parser.add_argument(
         "-p", "--image-prompt",
         default=None,
-        help="Path to a file containing the image prompt template (env: GIS_IMAGE_PROMPT)"
+        help="Path to a file containing the image prompt template (env: GRN_IMAGE_PROMPT)"
     )
     parser.add_argument(
         "-a", "--aspect-ratio",
         default=None,
         choices=["1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"],
-        help=f"Image aspect ratio (env: GIS_ASPECT_RATIO, default: {DEFAULT_ASPECT_RATIO})"
+        help=f"Image aspect ratio (env: GRN_ASPECT_RATIO, default: {DEFAULT_ASPECT_RATIO})"
     )
     parser.add_argument(
         "-s", "--resolution",
         default=None,
         choices=["1K", "2K", "4K"],
-        help=f"Image resolution (env: GIS_RESOLUTION, default: {DEFAULT_RESOLUTION})"
+        help=f"Image resolution (env: GRN_RESOLUTION, default: {DEFAULT_RESOLUTION})"
     )
     parser.add_argument(
         "-c", "--config",
         default=None,
-        help="Path to a JSON configuration file (env: GIS_CONFIG). Priority: CLI > config file > env var"
+        help="Path to a JSON configuration file (env: GRN_CONFIG). Priority: CLI > config file > env var"
     )
     parser.add_argument(
         "-j", "--parallel",
         type=int,
         default=None,
-        help=f"Number of parallel processes for image generation (env: GIS_PARALLEL, default: {DEFAULT_PARALLEL})"
+        help=f"Number of parallel processes for image generation (env: GRN_PARALLEL, default: {DEFAULT_PARALLEL})"
     )
     # Vertex AI arguments
     parser.add_argument(
         "--vertex",
         action="store_true",
         default=None,
-        help="Use Vertex AI instead of API key authentication (env: GIS_VERTEX)"
+        help="Use Vertex AI instead of API key authentication (env: GRN_VERTEX)"
     )
     parser.add_argument(
         "--project",
         default=None,
-        help="Google Cloud project ID for Vertex AI (env: GIS_PROJECT)"
+        help="Google Cloud project ID for Vertex AI (env: GRN_PROJECT)"
     )
     parser.add_argument(
         "--location",
         default=None,
-        help="Google Cloud location for Vertex AI (env: GIS_LOCATION, default: us-central1)"
+        help="Google Cloud location for Vertex AI (env: GRN_LOCATION, default: us-central1)"
     )
     parser.add_argument(
         "--credentials",
@@ -443,13 +443,13 @@ def main() -> None:
     parser.add_argument(
         "-d", "--output-directory",
         default=None,
-        help="Directory to store output files (.txt and .png) (env: GIS_OUTPUT_DIRECTORY, default: current directory)"
+        help="Directory to store output files (.txt and .png) (env: GRN_OUTPUT_DIRECTORY, default: current directory)"
     )
 
     args = parser.parse_args()
 
     # Load config file if provided (CLI or env var)
-    config_path = args.config or os.environ.get("GIS_CONFIG")
+    config_path = args.config or os.environ.get("GRN_CONFIG")
     config = {}
     if config_path:
         config_file = Path(config_path)
@@ -475,39 +475,39 @@ def main() -> None:
     def resolve(cli_value, config_key: str, env_key: str, default=None):
         return resolve_config(cli_value, config, config_key, env_key, default)
 
-    # Resolve backend first (it affects other defaults)
-    backend = resolve(args.backend, "backend", "GIS_BACKEND", DEFAULT_BACKEND)
-    if backend not in ("gemini", "openai"):
-        parser.error(f"--backend must be 'gemini' or 'openai', got: {backend}")
+    # Resolve api_service first (it affects other defaults)
+    api_service_name = resolve(args.api_service, "api_service", "GRN_API_SERVICE", DEFAULT_API_SERVICE)
+    if api_service_name not in ("gemini", "openai"):
+        parser.error(f"--api-service must be 'gemini' or 'openai', got: {api_service_name}")
 
-    # Get backend-specific configuration and functions
+    # Get service-specific configuration and functions
     try:
-        api_service = get_api_service(backend)
+        api_service = get_api_service(api_service_name)
     except ValueError as e:
         parser.error(str(e))
 
     # Resolve all settings with priority: CLI > config > env > default
-    topic = resolve(args.topic, "topic", "GIS_TOPIC")
-    ref_image = resolve(args.ref_image, "ref_image", "GIS_REF_IMAGE")
-    outline_prompt_path = resolve(args.outline_prompt, "outline_prompt", "GIS_OUTLINE_PROMPT")
-    image_prompt_path = resolve(args.image_prompt, "image_prompt", "GIS_IMAGE_PROMPT")
-    aspect_ratio = resolve(args.aspect_ratio, "aspect_ratio", "GIS_ASPECT_RATIO", DEFAULT_ASPECT_RATIO)
-    resolution = resolve(args.resolution, "resolution", "GIS_RESOLUTION", DEFAULT_RESOLUTION)
+    topic = resolve(args.topic, "topic", "GRN_TOPIC")
+    ref_image = resolve(args.ref_image, "ref_image", "GRN_REF_IMAGE")
+    outline_prompt_path = resolve(args.outline_prompt, "outline_prompt", "GRN_OUTLINE_PROMPT")
+    image_prompt_path = resolve(args.image_prompt, "image_prompt", "GRN_IMAGE_PROMPT")
+    aspect_ratio = resolve(args.aspect_ratio, "aspect_ratio", "GRN_ASPECT_RATIO", DEFAULT_ASPECT_RATIO)
+    resolution = resolve(args.resolution, "resolution", "GRN_RESOLUTION", DEFAULT_RESOLUTION)
 
-    # Backend-specific settings
-    if backend == "gemini":
+    # Service-specific settings
+    if api_service_name == "gemini":
         api_key = resolve(args.api_key, "api_key", "GEMINI_API_KEY")
         base_url = resolve(args.base_url, "base_url", "GEMINI_BASE_URL", api_service.default_base_url)
-        image_model = resolve(args.image_model, "image_model", "GIS_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
-        text_model = resolve(args.text_model, "text_model", "GIS_TEXT_MODEL", DEFAULT_GEMINI_TEXT_MODEL)
+        image_model = resolve(args.image_model, "image_model", "GRN_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
+        text_model = resolve(args.text_model, "text_model", "GRN_TEXT_MODEL", DEFAULT_GEMINI_TEXT_MODEL)
     else:  # openai
         api_key = resolve(args.api_key, "api_key", "OPENAI_API_KEY")
         base_url = resolve(args.base_url, "base_url", "OPENAI_BASE_URL", api_service.default_base_url)
-        image_model = resolve(args.image_model, "image_model", "GIS_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL)
-        text_model = resolve(args.text_model, "text_model", "GIS_TEXT_MODEL", DEFAULT_OPENAI_TEXT_MODEL)
+        image_model = resolve(args.image_model, "image_model", "GRN_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL)
+        text_model = resolve(args.text_model, "text_model", "GRN_TEXT_MODEL", DEFAULT_OPENAI_TEXT_MODEL)
 
     # Parse parallel with explicit error handling for invalid values
-    parallel_str = resolve(args.parallel, "parallel", "GIS_PARALLEL", DEFAULT_PARALLEL)
+    parallel_str = resolve(args.parallel, "parallel", "GRN_PARALLEL", DEFAULT_PARALLEL)
     try:
         parallel = int(parallel_str) if isinstance(parallel_str, str) else parallel_str
     except ValueError:
@@ -515,37 +515,37 @@ def main() -> None:
     if parallel < 1:
         parser.error(f"--parallel must be at least 1, got {parallel}")
     
-    # Vertex AI settings (only for Gemini backend) - use parse_bool for consistent boolean handling
-    vertex_raw = resolve(args.vertex, "vertex", "GIS_VERTEX", False)
+    # Vertex AI settings (only for Gemini service) - use parse_bool for consistent boolean handling
+    vertex_raw = resolve(args.vertex, "vertex", "GRN_VERTEX", False)
     vertex = parse_bool(vertex_raw)
-    project = resolve(args.project, "project", "GIS_PROJECT")
-    location = resolve(args.location, "location", "GIS_LOCATION", api_service.default_location or "us-central1")
+    project = resolve(args.project, "project", "GRN_PROJECT")
+    location = resolve(args.location, "location", "GRN_LOCATION", api_service.default_location or "us-central1")
     credentials = resolve(args.credentials, "credentials", "GOOGLE_APPLICATION_CREDENTIALS")
-    output_directory = resolve(args.output_directory, "output_directory", "GIS_OUTPUT_DIRECTORY", ".")
+    output_directory = resolve(args.output_directory, "output_directory", "GRN_OUTPUT_DIRECTORY", ".")
 
     # Validate required parameters
     if not topic:
-        parser.error("topic is required (provide as argument, in config file, or via GIS_TOPIC env var)")
+        parser.error("topic is required (provide as argument, in config file, or via GRN_TOPIC env var)")
     
-    if backend == "gemini":
+    if api_service_name == "gemini":
         if vertex:
             # Vertex AI mode requires project
             if not project:
-                parser.error("--project is required for Vertex AI mode (or set in config file or GIS_PROJECT env var)")
+                parser.error("--project is required for Vertex AI mode (or set in config file or GRN_PROJECT env var)")
         else:
             # API key mode requires api_key
             if not api_key:
                 parser.error("--api-key is required (or set in config file or GEMINI_API_KEY env var)")
     else:  # openai
         if not api_key:
-            parser.error("--api-key is required for OpenAI backend (or set in config file or OPENAI_API_KEY env var)")
+            parser.error("--api-key is required for OpenAI service (or set in config file or OPENAI_API_KEY env var)")
 
     # ref_image is optional - if not provided, cover generates freely,
     # and subsequent pages use cover as reference
     if not outline_prompt_path:
-        parser.error("--outline-prompt is required (or set in config file or GIS_OUTLINE_PROMPT env var)")
+        parser.error("--outline-prompt is required (or set in config file or GRN_OUTLINE_PROMPT env var)")
     if not image_prompt_path:
-        parser.error("--image-prompt is required (or set in config file or GIS_IMAGE_PROMPT env var)")
+        parser.error("--image-prompt is required (or set in config file or GRN_IMAGE_PROMPT env var)")
 
     # Create output directory if it doesn't exist
     output_dir = Path(output_directory)
@@ -603,10 +603,10 @@ def main() -> None:
         logging.warning(f"Reference image not found: {ref_image}")
 
     logging.info(f"主题: {topic}")
-    logging.info(f"后端: {backend}")
+    logging.info(f"API服务: {api_service_name}")
     logging.info(f"文本模型: {text_model}")
     logging.info(f"图像模型: {image_model}")
-    if backend == "gemini":
+    if api_service_name == "gemini":
         if vertex:
             logging.info(f"使用 Vertex AI 模式 (project: {project}, location: {location})")
         else:
@@ -615,8 +615,8 @@ def main() -> None:
         logging.info(f"使用 OpenAI API (base_url: {base_url})")
     logging.info(f"输出目录: {output_dir.absolute()}")
 
-    # Create client configuration based on backend
-    if backend == "gemini":
+    # Create client configuration based on api_service
+    if api_service_name == "gemini":
         client_config = api_service.config_class(
             api_key=api_key,
             base_url=base_url,

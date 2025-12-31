@@ -19,7 +19,7 @@ from .openai_compat import (
 
 
 class APIService:
-    """Container for backend-specific configuration and functions."""
+    """Container for API service-specific configuration and functions."""
 
     def __init__(
         self,
@@ -36,19 +36,19 @@ class APIService:
         self.default_location = default_location
 
 
-def get_api_service(backend: str) -> APIService:
-    """Get backend-specific configuration and functions.
+def get_api_service(api_service_name: str) -> APIService:
+    """Get API service-specific configuration and functions.
 
     Args:
-        backend: Backend name, either "gemini" or "openai"
+        api_service_name: API service name, either "gemini" or "openai"
 
     Returns:
         APIService containing config class and generate functions
 
     Raises:
-        ValueError: If backend is not supported or not available
+        ValueError: If api_service is not supported or not available
     """
-    if backend == "gemini":
+    if api_service_name == "gemini":
         return APIService(
             config_class=_GeminiConfig,
             generate_text=_gemini_generate_text,
@@ -56,7 +56,7 @@ def get_api_service(backend: str) -> APIService:
             default_base_url=_GEMINI_DEFAULT_BASE_URL,
             default_location=_GEMINI_DEFAULT_LOCATION,
         )
-    elif backend == "openai":
+    elif api_service_name == "openai":
         return APIService(
             config_class=_OpenAIConfig,
             generate_text=_openai_generate_text,
@@ -64,7 +64,7 @@ def get_api_service(backend: str) -> APIService:
             default_base_url=_OPENAI_DEFAULT_BASE_URL,
         )
     else:
-        raise ValueError(f"Unsupported backend: {backend}. Must be 'gemini' or 'openai'")
+        raise ValueError(f"Unsupported api_service: {api_service_name}. Must be 'gemini' or 'openai'")
 
 
 __all__ = [
