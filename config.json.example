@@ -10,6 +10,7 @@
     "aspect_ratio": "3:4",
     "resolution": "1K",
     "parallel": 2,
+    "api_service": "gemini",
 
     "_comment": "以下为 Vertex AI 模式配置（与 api_key 二选一）",
     "vertex": false,
