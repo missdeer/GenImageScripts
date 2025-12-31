@@ -8,32 +8,18 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-# OpenAI SDK is required for this module
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    openai = None
+import openai
 
 __all__ = [
     "OpenAIConfig",
     "generate_text",
     "generate_image",
     "DEFAULT_BASE_URL",
-    "OPENAI_AVAILABLE",
 ]
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
-def _check_openai_available():
-    """Check if OpenAI SDK is available, raise ImportError if not."""
-    if not OPENAI_AVAILABLE:
-        raise ImportError(
-            "OpenAI SDK is required for OpenAI-compatible mode. "
-            "Install it with: pip install openai"
-        )
 
 
 @dataclass
@@ -49,7 +35,7 @@ class OpenAIConfig:
         Returns:
             openai.OpenAI client instance
         """
-        _check_openai_available()
+
         
         if not self.api_key:
             raise ValueError("API key is required for OpenAI-compatible mode")
@@ -81,7 +67,7 @@ def generate_text(
     Raises:
         RuntimeError: If API call fails
     """
-    _check_openai_available()
+
     
     try:
         response = client.chat.completions.create(
@@ -135,7 +121,7 @@ def generate_image(
         - For models like "gpt-image-1": Uses images.edit API with reference images
         - Reference images are encoded as base64 and sent to the API
     """
-    _check_openai_available()
+
     
     # If reference images provided, use edit API for compatible models
     if reference_images:

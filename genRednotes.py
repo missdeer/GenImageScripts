@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from src import get_api_service, OPENAI_AVAILABLE
+    from src import get_api_service
 except ImportError as e:
     print(f"Error: Failed to import src module: {e}")
     sys.exit(1)
@@ -479,11 +479,6 @@ def main() -> None:
     backend = resolve(args.backend, "backend", "GIS_BACKEND", DEFAULT_BACKEND)
     if backend not in ("gemini", "openai"):
         parser.error(f"--backend must be 'gemini' or 'openai', got: {backend}")
-
-    # Check OpenAI availability if selected
-    if backend == "openai" and not OPENAI_AVAILABLE:
-        parser.error("OpenAI backend selected but 'openai' package is not installed. "
-                     "Install it with: pip install openai")
 
     # Get backend-specific configuration and functions
     try:

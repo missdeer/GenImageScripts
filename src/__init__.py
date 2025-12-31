@@ -13,7 +13,6 @@ from .gemini import (
 from .openai_compat import (
     OpenAIConfig as _OpenAIConfig,
     DEFAULT_BASE_URL as _OPENAI_DEFAULT_BASE_URL,
-    OPENAI_AVAILABLE,
     generate_text as _openai_generate_text,
     generate_image as _openai_generate_image,
 )
@@ -58,11 +57,6 @@ def get_api_service(backend: str) -> APIService:
             default_location=_GEMINI_DEFAULT_LOCATION,
         )
     elif backend == "openai":
-        if not OPENAI_AVAILABLE:
-            raise ValueError(
-                "OpenAI backend selected but 'openai' package is not installed. "
-                "Install it with: pip install openai"
-            )
         return APIService(
             config_class=_OpenAIConfig,
             generate_text=_openai_generate_text,
@@ -76,5 +70,4 @@ def get_api_service(backend: str) -> APIService:
 __all__ = [
     "APIService",
     "get_api_service",
-    "OPENAI_AVAILABLE",
 ]

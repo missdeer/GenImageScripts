@@ -19,7 +19,6 @@ from src.openai_compat import (
     generate_text, 
     generate_image,
     DEFAULT_BASE_URL,
-    OPENAI_AVAILABLE,
 )
 
 
