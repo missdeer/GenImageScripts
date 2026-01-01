@@ -1,9 +1,0 @@
-{
-    "model": "gemini-3-pro-image-4k",
-    "base_url": "https://api.example.com/v1",
-    "api_key": "your-api-key",
-    "output": "output.jpg",
-    "prompt": "生成一张风景图片",
-    "prompt_file": "prompt.txt",
-    "images": ["ref1.jpg", "ref2.png"]
-}
