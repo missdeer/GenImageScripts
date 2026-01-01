@@ -14,6 +14,7 @@ __all__ = [
     "GeminiConfig",
     "generate_text",
     "generate_image",
+    "generate_image_via_chat",
     "DEFAULT_BASE_URL",
     "DEFAULT_LOCATION",
 ]
@@ -206,3 +207,84 @@ def generate_image(
             result_text = "\n".join(texts)
 
     return result_image, result_text
+
+
+def generate_image_via_chat(
+    client: genai.Client,
+    model: str,
+    prompt: str,
+    reference_images: list[str] | None = None,
+    aspect_ratio: str = "3:4",
+    resolution: str = "1K",
+) -> tuple[bytes | None, str | None]:
+    """Generate an image using chat-style API and return raw bytes.
+
+    This is a wrapper around generate_image that returns image bytes
+    instead of PIL Image, matching the signature of openai_compat.generate_image_via_chat.
+
+    Args:
+        client: GenAI client instance
+        model: Model name to use for generation
+        prompt: The prompt text describing the image
+        reference_images: Optional list of paths to reference images
+        aspect_ratio: Image aspect ratio (default: "3:4")
+        resolution: Image resolution (default: "1K")
+
+    Returns:
+        Tuple of (image bytes or None, text response or None)
+
+    Raises:
+        RuntimeError: If API call fails or content is blocked
+    """
+    import io
+
+    # Convert string paths to Path objects
+    ref_paths = None
+    if reference_images:
+        ref_paths = [Path(p) for p in reference_images]
+
+    # Call the existing generate_image function
+    result_image, result_text = generate_image(
+        client=client,
+        model=model,
+        prompt=prompt,
+        reference_images=ref_paths,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+    )
+
+    # Convert image to bytes
+    image_bytes = None
+    if result_image is not None:
+        # result_image is a google.genai.types.Image object
+        # It has a save(path) method, but we need bytes
+        # Try different approaches to extract the image data
+
+        # Method 1: Check for _pil_image attribute (internal PIL image)
+        if hasattr(result_image, '_pil_image') and result_image._pil_image is not None:
+            buffer = io.BytesIO()
+            result_image._pil_image.save(buffer, format="PNG")
+            buffer.seek(0)
+            image_bytes = buffer.read()
+        # Method 2: Check for raw data attribute
+        elif hasattr(result_image, 'data') and result_image.data is not None:
+            image_bytes = result_image.data
+        elif hasattr(result_image, '_loaded_bytes') and result_image._loaded_bytes is not None:
+            image_bytes = result_image._loaded_bytes
+        # Method 3: Check for image_bytes attribute
+        elif hasattr(result_image, 'image_bytes') and result_image.image_bytes is not None:
+            image_bytes = result_image.image_bytes
+        # Method 4: Save to temp file and read back
+        else:
+            import tempfile
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp_path = tmp.name
+                result_image.save(tmp_path)
+                with open(tmp_path, "rb") as f:
+                    image_bytes = f.read()
+                os.unlink(tmp_path)
+            except Exception as e:
+                logging.warning(f"无法从响应中提取图片数据: {e}")
+
+    return image_bytes, result_text

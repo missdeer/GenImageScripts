@@ -5,7 +5,11 @@ import json
 import sys
 import os
 
-from src.openai_compat import OpenAIConfig, generate_image_via_chat
+from src.openai_compat import OpenAIConfig, generate_image_via_chat as openai_generate_image_via_chat
+from src.gemini import GeminiConfig, generate_image_via_chat as gemini_generate_image_via_chat
+
+# 支持的 API 服务
+API_SERVICES = ["openai", "gemini", "vertexai"]
 
 
 def load_config(config_path: str) -> dict:
@@ -26,32 +30,36 @@ def load_config(config_path: str) -> dict:
 
 # 可用的模型列表
 AVAILABLE_MODELS = [
-    "gemini-3-pro-image-preview", # 预览版
-    "gemini-3-pro-image",        # 默认 1:1 比例
-    "gemini-3-pro-image-3x4",    # 3:4 小红书风格
-    "gemini-3-pro-image-4x3",    # 4:3 标准横图
-    "gemini-3-pro-image-9x16",   # 9:16 手机壁纸
-    "gemini-3-pro-image-16x9",   # 16:9 横屏
-    "gemini-3-pro-image-4k",     # 4K 超清图 (1:1)
-    "gemini-3-pro-image-16x9-4k",# 16:9 4K 超清图
-    "gemini-3-pro-image-9x16-4k", # 9:16 4K 超清图
-    "gemini-3-pro-image-3x4-4k", # 3:4 4K 超清图
-    "gemini-3-pro-image-4x3-4k"  # 4:3 4K 超清图
+    "gemini-3-pro-image-preview (CLIProxyAPI gemini/vertexai 模式)", # 预览版
+    "gemini-3-pro-image (AntiGravity-Manager openai 模式)",        # 默认 1:1 比例
+    "gemini-3-pro-image-3x4 (AntiGravity-Manager openai 模式)",    # 3:4 小红书风格
+    "gemini-3-pro-image-4x3 (AntiGravity-Manager openai 模式)",    # 4:3 标准横图
+    "gemini-3-pro-image-9x16 (AntiGravity-Manager openai 模式)",   # 9:16 手机壁纸
+    "gemini-3-pro-image-16x9 (AntiGravity-Manager openai 模式)",   # 16:9 横屏
+    "gemini-3-pro-image-4k (AntiGravity-Manager openai 模式)",     # 4K 超清图 (1:1)
+    "gemini-3-pro-image-16x9-4k (AntiGravity-Manager openai 模式)",# 16:9 4K 超清图
+    "gemini-3-pro-image-9x16-4k (AntiGravity-Manager openai 模式)", # 9:16 4K 超清图
+    "gemini-3-pro-image-3x4-4k (AntiGravity-Manager openai 模式)", # 3:4 4K 超清图
+    "gemini-3-pro-image-4x3-4k (AntiGravity-Manager openai 模式)"  # 4:3 4K 超清图
 ]
 
 # 默认值
 DEFAULTS = {
-    "model": "gemini-3-pro-image-3x4",
+    "api_service": "gemini",
+    "model": "gemini-3-pro-image-preview",
     "base_url": "http://127.0.0.1:8045/v1",
     "api_key": "sk-c526bb53270242339bd07504d11607a4",
     "output": "xhs1.jpg",
+    "location": "us-central1",
+    "aspect_ratio": "1:1",
+    "resolution": "1K",
     "prompt": '''为以下文字生成小红书风格3:4宽高比的图片，要求将以下文本完整显示在图中，不要修改，字体颜色为黑色，字体大一点，不要使图片留出很多空白。添加浅色的科技感的背景，搜索你的知识库或网络并添加Claude Code和Gemini CLI和Codex CLI三者的官方logo在背景上：
 "不用 MCP ，不用 SKILLs ，多 agent 协作让 Claude Code 调用 Gemini CLI 和 Codex CLI 只需要在 CLAUDE.md 里加两句话…"'''
 }
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(
-    description="调用OpenAI兼容API生成图片",
+    description="调用 OpenAI/Gemini/Vertex AI API 生成图片",
     formatter_class=argparse.RawTextHelpFormatter
 )
 parser.add_argument(
@@ -60,9 +68,13 @@ parser.add_argument(
     help="从 JSON 配置文件读取配置（命令行参数优先级更高）"
 )
 parser.add_argument(
+    "-s", "--api-service",
+    choices=API_SERVICES,
+    help="API 服务类型（默认: gemini）\n可选值: openai, gemini, vertexai"
+)
+parser.add_argument(
     "-m", "--model",
-    choices=AVAILABLE_MODELS,
-    help="模型名称（默认: gemini-3-pro-image-3x4）\n可选值:\n" +
+    help="模型名称（默认: gemini-3-pro-image-preview）\n可选值:\n" +
          "\n".join(f"  {m}" for m in AVAILABLE_MODELS)
 )
 # 提示词互斥组（-p/--prompt 和 --prompt-file 不能同时使用）
@@ -86,6 +98,29 @@ parser.add_argument(
 parser.add_argument(
    "-o", "--output",
     help="输出图片文件名（默认: xhs1.jpg）"
+)
+# Vertex AI 专用参数
+parser.add_argument(
+    "-j", "--project",
+    help="Google Cloud 项目 ID（vertexai 模式必需）"
+)
+parser.add_argument(
+    "-l", "--location",
+    help="Vertex AI 区域（默认: us-central1）"
+)
+parser.add_argument(
+    "-x", "--credentials",
+    help="Google Cloud 凭证文件路径"
+)
+# Gemini 图片生成参数
+parser.add_argument(
+    "-t", "--aspect-ratio",
+    help="图片宽高比（gemini/vertexai 模式，默认: 1:1）\n可选值: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16, 9:21"
+)
+parser.add_argument(
+    "-r", "--resolution",
+    choices=["1K", "2K", "4K"],
+    help="图片分辨率（gemini/vertexai 模式，默认: 1K）\n可选值: 1K, 2K, 4K"
 )
 parser.add_argument(
     "images",
@@ -113,16 +148,29 @@ def main():
     if args.config:
         config = load_config(args.config)
 
+    # 解析 API 服务类型
+    api_service = get_config_value("api_service", args.api_service, config)
+    if api_service not in API_SERVICES:
+        print(f"错误: 无效的 API 服务类型: {api_service}", file=sys.stderr)
+        print(f"可选值: {', '.join(API_SERVICES)}", file=sys.stderr)
+        sys.exit(1)
+
     # 解析配置值（命令行参数优先级高于配置文件）
     model = get_config_value("model", args.model, config)
     base_url = get_config_value("base_url", args.base_url, config)
     api_key = get_config_value("api_key", args.api_key, config)
     output = get_config_value("output", args.output, config)
+    aspect_ratio = get_config_value("aspect_ratio", args.aspect_ratio, config)
+    resolution = get_config_value("resolution", args.resolution, config)
 
-    # 验证模型是否有效
-    if model not in AVAILABLE_MODELS:
-        print(f"错误: 无效的模型名称: {model}", file=sys.stderr)
-        print(f"可选值: {', '.join(AVAILABLE_MODELS)}", file=sys.stderr)
+    # Vertex AI 专用参数
+    project = args.project or config.get("project")
+    location = get_config_value("location", args.location, config)
+    credentials = args.credentials or config.get("credentials")
+
+    # 验证 Vertex AI 必需参数
+    if api_service == "vertexai" and not project:
+        print("错误: vertexai 模式需要指定 --project 参数", file=sys.stderr)
         sys.exit(1)
 
     # 获取 prompt_file（命令行参数优先级高于配置文件）
@@ -156,14 +204,28 @@ def main():
         print(f"错误: 输出目录不存在: {output_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # 创建 OpenAI 客户端
+    # 根据 API 服务类型创建客户端
     try:
-        openai_config = OpenAIConfig(
-            api_key=api_key,
-            base_url=base_url,
-            model=model
-        )
-        client = openai_config.create_client()
+        if api_service == "openai":
+            client_config = OpenAIConfig(
+                api_key=api_key,
+                base_url=base_url,
+                model=model
+            )
+            generate_image_fn = openai_generate_image_via_chat
+        else:
+            # gemini 或 vertexai
+            client_config = GeminiConfig(
+                api_key=api_key if api_service == "gemini" else None,
+                base_url=base_url,
+                vertex=api_service == "vertexai",
+                project=project,
+                location=location,
+                credentials=credentials,
+            )
+            generate_image_fn = gemini_generate_image_via_chat
+
+        client = client_config.create_client()
     except ValueError as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
@@ -196,12 +258,23 @@ def main():
 
     # 调用 API 生成图片
     try:
-        image_bytes, text_response = generate_image_via_chat(
-            client=client,
-            model=model,
-            prompt=prompt_text,
-            reference_images=images if images else None,
-        )
+        if api_service == "openai":
+            image_bytes, text_response = generate_image_fn(
+                client=client,
+                model=model,
+                prompt=prompt_text,
+                reference_images=images if images else None,
+            )
+        else:
+            # gemini 或 vertexai
+            image_bytes, text_response = generate_image_fn(
+                client=client,
+                model=model,
+                prompt=prompt_text,
+                reference_images=images if images else None,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+            )
     except RuntimeError as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)

@@ -1,0 +1,17 @@
+{
+    "api_service": "openai",
+    "model": "gemini-3-pro-image-3x4",
+    "base_url": "http://127.0.0.1:8045/v1",
+    "api_key": "your-api-key-here",
+    "output": "output.jpg",
+    "prompt": "生成一张图片",
+    "prompt_file": "prompt.txt",
+    "images": ["reference1.jpg", "reference2.png"],
+    "aspect_ratio": "3:4",
+    "resolution": "1K",
+
+    "_comment": "以下为 Vertex AI 模式配置（api_service 设为 vertexai 时使用）",
+    "project": "your-gcp-project-id",
+    "location": "us-central1",
+    "credentials": "path/to/service-account.json"
+}
