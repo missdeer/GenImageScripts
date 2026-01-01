@@ -14,6 +14,7 @@ __all__ = [
     "OpenAIConfig",
     "generate_text",
     "generate_image",
+    "encode_image_to_base64",
     "DEFAULT_BASE_URL",
 ]
 
@@ -131,7 +132,7 @@ def generate_image(
     return _generate_image_standard(client, model, prompt, size)
 
 
-def _encode_image_to_base64(image_path) -> str | None:
+def encode_image_to_base64(image_path) -> str | None:
     """Encode an image file to base64 string."""
     from pathlib import Path
     
@@ -217,7 +218,7 @@ def _generate_image_with_reference(
         
         # Add reference images
         for img_path in reference_images:
-            b64_data = _encode_image_to_base64(img_path)
+            b64_data = encode_image_to_base64(img_path)
             if b64_data:
                 # Detect image type
                 path = Path(img_path) if not isinstance(img_path, Path) else img_path

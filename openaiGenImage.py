@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 
-from openai import OpenAI
 import argparse
 import base64
+import io
 import json
 import sys
 import os
 
+from PIL import Image
 
-def encode_image(image_path: str) -> str:
-    """将本地图片编码为 base64 字符串"""
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+from src.openai_compat import OpenAIConfig, encode_image_to_base64
 
 
 def load_config(config_path: str) -> dict:
@@ -28,6 +26,50 @@ def load_config(config_path: str) -> dict:
     except IOError as e:
         print(f"错误: 读取配置文件失败: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def convert_image_to_png(image_path: str, ext: str) -> tuple[str | None, str]:
+    """
+    将 BMP 或 SVG 图片转换为 PNG 格式并返回 base64 编码
+    
+    Args:
+        image_path: 图片文件路径
+        ext: 文件扩展名（.bmp 或 .svg）
+    
+    Returns:
+        元组 (base64编码字符串, MIME类型) 或 (None, "") 表示失败
+    """
+    try:
+        if ext == ".bmp":
+            # 使用 PIL 转换 BMP -> PNG
+            with Image.open(image_path) as img:
+                # 转换为 RGB 模式（如果需要）
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGBA")
+                else:
+                    img = img.convert("RGB")
+                
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG")
+                buffer.seek(0)
+                return base64.b64encode(buffer.read()).decode("utf-8"), "image/png"
+        
+        elif ext == ".svg":
+            # 使用 cairosvg 转换 SVG -> PNG
+            try:
+                import cairosvg
+            except ImportError:
+                print("错误: 需要安装 cairosvg 来处理 SVG 文件: pip install cairosvg", file=sys.stderr)
+                return None, ""
+            
+            png_data = cairosvg.svg2png(url=image_path)
+            return base64.b64encode(png_data).decode("utf-8"), "image/png"
+        
+        return None, ""
+    
+    except Exception as e:
+        print(f"错误: 转换图片格式失败 '{image_path}': {e}", file=sys.stderr)
+        return None, ""
 
 
 # 可用的模型列表
@@ -163,10 +205,18 @@ def main():
 
     # 创建 OpenAI 客户端
     try:
-        client = OpenAI(
+        openai_config = OpenAIConfig(
+            api_key=api_key,
             base_url=base_url,
-            api_key=api_key
+            model=model
         )
+        client = openai_config.create_client()
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"错误: 创建 API 客户端失败: {e}", file=sys.stderr)
         sys.exit(1)
@@ -197,16 +247,35 @@ def main():
     # 添加所有本地图片到 content 中
     for image_path in images:
         try:
-            image_base64 = encode_image(image_path)
+            ext = os.path.splitext(image_path)[1].lower()
+            
+            # BMP 和 SVG 需要先转换为 PNG
+            if ext in (".bmp", ".svg"):
+                image_base64, mime_type = convert_image_to_png(image_path, ext)
+                if image_base64 is None:
+                    print(f"错误: 无法转换图片文件 '{image_path}'", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                image_base64 = encode_image_to_base64(image_path)
+                if image_base64 is None:
+                    print(f"错误: 无法读取图片文件 '{image_path}'", file=sys.stderr)
+                    sys.exit(1)
+                
+                # 检测图片 MIME 类型
+                mime_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                }.get(ext, "image/jpeg")
+            
             message_content.append({
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_base64}"
+                    "url": f"data:{mime_type};base64,{image_base64}"
                 }
             })
-        except IOError as e:
-            print(f"错误: 读取图片文件失败 '{image_path}': {e}", file=sys.stderr)
-            sys.exit(1)
         except Exception as e:
             print(f"错误: 编码图片失败 '{image_path}': {e}", file=sys.stderr)
             sys.exit(1)
