@@ -3,6 +3,7 @@
 from openai import OpenAI
 import argparse
 import base64
+import json
 import sys
 import os
 
@@ -11,6 +12,22 @@ def encode_image(image_path: str) -> str:
     """将本地图片编码为 base64 字符串"""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
+
+
+def load_config(config_path: str) -> dict:
+    """从 JSON 文件加载配置"""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"错误: 配置文件不存在: {config_path}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"错误: 配置文件 JSON 格式错误: {e}", file=sys.stderr)
+        sys.exit(1)
+    except IOError as e:
+        print(f"错误: 读取配置文件失败: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 # 可用的模型列表
@@ -27,22 +44,32 @@ AVAILABLE_MODELS = [
     "gemini-3-pro-image-4x3-4k"  # 4:3 4K 超清图
 ]
 
+# 默认值
+DEFAULTS = {
+    "model": "gemini-3-pro-image-3x4",
+    "base_url": "http://127.0.0.1:8045/v1",
+    "api_key": "sk-c526bb53270242339bd07504d11607a4",
+    "output": "xhs1.jpg",
+    "prompt": '''为以下文字生成小红书风格3:4宽高比的图片，要求将以下文本完整显示在图中，不要修改，字体颜色为黑色，字体大一点，不要使图片留出很多空白。添加浅色的科技感的背景，搜索你的知识库或网络并添加Claude Code和Gemini CLI和Codex CLI三者的官方logo在背景上：
+"不用 MCP ，不用 SKILLs ，多 agent 协作让 Claude Code 调用 Gemini CLI 和 Codex CLI 只需要在 CLAUDE.md 里加两句话…"'''
+}
+
 # 解析命令行参数
 parser = argparse.ArgumentParser(
     description="调用OpenAI兼容API生成图片",
     formatter_class=argparse.RawTextHelpFormatter
 )
 parser.add_argument(
+    "-c", "--config",
+    metavar="FILE",
+    help="从 JSON 配置文件读取配置（命令行参数优先级更高）"
+)
+parser.add_argument(
     "-m", "--model",
     choices=AVAILABLE_MODELS,
-    default="gemini-3-pro-image-3x4",
     help="模型名称（默认: gemini-3-pro-image-3x4）\n可选值:\n" +
          "\n".join(f"  {m}" for m in AVAILABLE_MODELS)
 )
-# 默认提示词
-DEFAULT_PROMPT = '''为以下文字生成小红书风格3:4宽高比的图片，要求将以下文本完整显示在图中，不要修改，字体颜色为黑色，字体大一点，不要使图片留出很多空白。添加浅色的科技感的背景，搜索你的知识库或网络并添加Claude Code和Gemini CLI和Codex CLI三者的官方logo在背景上：
-"不用 MCP ，不用 SKILLs ，多 agent 协作让 Claude Code 调用 Gemini CLI 和 Codex CLI 只需要在 CLAUDE.md 里加两句话…"'''
-
 # 提示词互斥组（-p/--prompt 和 --prompt-file 不能同时使用）
 prompt_group = parser.add_mutually_exclusive_group()
 prompt_group.add_argument(
@@ -55,17 +82,14 @@ prompt_group.add_argument(
 )
 parser.add_argument(
     "--base-url",
-    default="http://127.0.0.1:8045/v1",
     help="API 基础 URL（默认: http://127.0.0.1:8045/v1）"
 )
 parser.add_argument(
     "--api-key",
-    default="sk-c526bb53270242339bd07504d11607a4",
     help="API 密钥"
 )
 parser.add_argument(
     "-o", "--output",
-    default="xhs1.jpg",
     help="输出图片文件名（默认: xhs1.jpg）"
 )
 parser.add_argument(
@@ -77,21 +101,62 @@ parser.add_argument(
 args = parser.parse_args()
 
 
+def get_config_value(key: str, cli_value, config: dict) -> str:
+    """
+    获取配置值，优先级：命令行参数 > 配置文件 > 默认值
+    """
+    if cli_value is not None:
+        return cli_value
+    if config and key in config:
+        return config[key]
+    return DEFAULTS.get(key)
+
+
 def main():
+    # 加载配置文件（如果指定）
+    config = {}
+    if args.config:
+        config = load_config(args.config)
+
+    # 解析配置值（命令行参数优先级高于配置文件）
+    model = get_config_value("model", args.model, config)
+    base_url = get_config_value("base_url", args.base_url, config)
+    api_key = get_config_value("api_key", args.api_key, config)
+    output = get_config_value("output", args.output, config)
+
+    # 验证模型是否有效
+    if model not in AVAILABLE_MODELS:
+        print(f"错误: 无效的模型名称: {model}", file=sys.stderr)
+        print(f"可选值: {', '.join(AVAILABLE_MODELS)}", file=sys.stderr)
+        sys.exit(1)
+
+    # 获取 prompt_file（命令行参数优先级高于配置文件）
+    prompt_file = args.prompt_file
+    if prompt_file is None and config and "prompt_file" in config:
+        # 只有当命令行没有指定 -p/--prompt 时才使用配置文件中的 prompt_file
+        if args.prompt is None:
+            prompt_file = config.get("prompt_file")
+
     # 验证 --prompt-file 文件是否存在
-    if args.prompt_file:
-        if not os.path.isfile(args.prompt_file):
-            print(f"错误: 提示词文件不存在: {args.prompt_file}", file=sys.stderr)
+    if prompt_file:
+        if not os.path.isfile(prompt_file):
+            print(f"错误: 提示词文件不存在: {prompt_file}", file=sys.stderr)
             sys.exit(1)
 
+    # 获取图片列表（命令行参数追加到配置文件中的图片列表）
+    images = list(args.images) if args.images else []
+    if config and "images" in config and isinstance(config["images"], list):
+        # 配置文件中的图片放在前面，命令行的放在后面
+        images = config["images"] + images
+
     # 验证所有输入图片文件是否存在
-    for image_path in args.images:
+    for image_path in images:
         if not os.path.isfile(image_path):
             print(f"错误: 图片文件不存在: {image_path}", file=sys.stderr)
             sys.exit(1)
 
     # 验证输出目录是否存在
-    output_dir = os.path.dirname(args.output)
+    output_dir = os.path.dirname(output)
     if output_dir and not os.path.isdir(output_dir):
         print(f"错误: 输出目录不存在: {output_dir}", file=sys.stderr)
         sys.exit(1)
@@ -99,17 +164,17 @@ def main():
     # 创建 OpenAI 客户端
     try:
         client = OpenAI(
-            base_url=args.base_url,
-            api_key=args.api_key
+            base_url=base_url,
+            api_key=api_key
         )
     except Exception as e:
         print(f"错误: 创建 API 客户端失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 确定提示词：优先使用 --prompt-file，其次 -p/--prompt，最后使用默认值
-    if args.prompt_file:
+    # 确定提示词：优先使用命令行参数，其次配置文件，最后使用默认值
+    if prompt_file:
         try:
-            with open(args.prompt_file, "r", encoding="utf-8") as f:
+            with open(prompt_file, "r", encoding="utf-8") as f:
                 prompt_text = f.read()
         except IOError as e:
             print(f"错误: 读取提示词文件失败: {e}", file=sys.stderr)
@@ -120,9 +185,9 @@ def main():
     elif args.prompt:
         prompt_text = args.prompt
     else:
-        prompt_text = DEFAULT_PROMPT
+        prompt_text = get_config_value("prompt", None, config)
 
-    if not prompt_text.strip():
+    if not prompt_text or not prompt_text.strip():
         print("错误: 提示词不能为空", file=sys.stderr)
         sys.exit(1)
 
@@ -130,7 +195,7 @@ def main():
     message_content = [{"type": "text", "text": prompt_text}]
 
     # 添加所有本地图片到 content 中
-    for image_path in args.images:
+    for image_path in images:
         try:
             image_base64 = encode_image(image_path)
             message_content.append({
@@ -149,7 +214,7 @@ def main():
     # 调用 API 生成图片
     try:
         response = client.chat.completions.create(
-            model=args.model,
+            model=model,
             messages=[{
                 "role": "user",
                 "content": message_content
@@ -199,9 +264,9 @@ def main():
         sys.exit(1)
 
     try:
-        with open(args.output, 'wb') as f:
+        with open(output, 'wb') as f:
             f.write(image_bytes)
-        print(f"图片已保存到: {args.output}")
+        print(f"图片已保存到: {output}")
     except IOError as e:
         print(f"错误: 保存图片失败: {e}", file=sys.stderr)
         sys.exit(1)
