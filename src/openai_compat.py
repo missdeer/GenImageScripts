@@ -14,7 +14,11 @@ __all__ = [
     "OpenAIConfig",
     "generate_text",
     "generate_image",
+    "generate_image_via_chat",
     "encode_image_to_base64",
+    "encode_image_for_api",
+    "get_mime_type",
+    "convert_image_to_png",
     "DEFAULT_BASE_URL",
 ]
 
@@ -135,18 +139,190 @@ def generate_image(
 def encode_image_to_base64(image_path) -> str | None:
     """Encode an image file to base64 string."""
     from pathlib import Path
-    
+
     path = Path(image_path) if not isinstance(image_path, Path) else image_path
     if not path.exists():
         logging.warning(f"参考图片不存在: {path}")
         return None
-    
+
     try:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
     except (OSError, IOError) as e:
         logging.warning(f"无法读取参考图片 {path}: {e}")
         return None
+
+
+def get_mime_type(file_path: str) -> str:
+    """Get MIME type based on file extension.
+
+    Args:
+        file_path: Path to the image file
+
+    Returns:
+        MIME type string (e.g., "image/png", "image/jpeg")
+    """
+    import os
+    ext = os.path.splitext(file_path)[1].lower()
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".svg": "image/svg+xml",
+    }.get(ext, "image/jpeg")
+
+
+def convert_image_to_png(image_path: str, ext: str) -> tuple[str | None, str]:
+    """Convert BMP or SVG image to PNG format and return base64 encoding.
+
+    Args:
+        image_path: Path to the image file
+        ext: File extension (.bmp or .svg)
+
+    Returns:
+        Tuple of (base64 encoded string, MIME type) or (None, "") on failure
+    """
+    try:
+        if ext == ".bmp":
+            # Use PIL to convert BMP -> PNG
+            with Image.open(image_path) as img:
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGBA")
+                else:
+                    img = img.convert("RGB")
+
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG")
+                buffer.seek(0)
+                return base64.b64encode(buffer.read()).decode("utf-8"), "image/png"
+
+        elif ext == ".svg":
+            # Use cairosvg to convert SVG -> PNG
+            try:
+                import cairosvg
+            except ImportError:
+                logging.error("需要安装 cairosvg 来处理 SVG 文件: pip install cairosvg")
+                return None, ""
+
+            png_data = cairosvg.svg2png(url=image_path)
+            return base64.b64encode(png_data).decode("utf-8"), "image/png"
+
+        return None, ""
+
+    except Exception as e:
+        logging.error(f"转换图片格式失败 '{image_path}': {e}")
+        return None, ""
+
+
+def encode_image_for_api(image_path: str) -> tuple[str | None, str]:
+    """Encode an image file to base64 with proper MIME type.
+
+    Handles BMP and SVG by converting to PNG first.
+
+    Args:
+        image_path: Path to the image file
+
+    Returns:
+        Tuple of (base64 encoded string, MIME type) or (None, "") on failure
+    """
+    import os
+    ext = os.path.splitext(image_path)[1].lower()
+
+    # BMP and SVG need conversion to PNG
+    if ext in (".bmp", ".svg"):
+        return convert_image_to_png(image_path, ext)
+
+    # Standard image formats
+    image_base64 = encode_image_to_base64(image_path)
+    if image_base64 is None:
+        return None, ""
+
+    mime_type = get_mime_type(image_path)
+    return image_base64, mime_type
+
+
+def generate_image_via_chat(
+    client,
+    model: str,
+    prompt: str,
+    reference_images: list[str] | None = None,
+) -> tuple[bytes | None, str | None]:
+    """Generate an image using chat completions API.
+
+    This is used for models that return images embedded in chat responses
+    (e.g., Gemini image generation models via OpenAI-compatible API).
+
+    Args:
+        client: OpenAI client instance
+        model: Model name to use for generation
+        prompt: The prompt text describing the image
+        reference_images: Optional list of paths to reference images
+
+    Returns:
+        Tuple of (image bytes or None, text response or None)
+
+    Raises:
+        RuntimeError: If API call fails or no image found in response
+    """
+    # Build message content
+    message_content = [{"type": "text", "text": prompt}]
+
+    # Add reference images if provided
+    if reference_images:
+        for image_path in reference_images:
+            image_base64, mime_type = encode_image_for_api(image_path)
+            if image_base64 is None:
+                logging.warning(f"无法读取参考图片: {image_path}")
+                continue
+
+            message_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{image_base64}"
+                }
+            })
+
+    # Call API
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": message_content}],
+        )
+    except Exception as e:
+        logging.error(f"图像生成 API 调用失败: {e}")
+        raise RuntimeError(f"图像生成失败: {e}") from e
+
+    if response is None:
+        raise RuntimeError("图像生成 API 返回空响应")
+
+    if not response.choices:
+        raise RuntimeError("图像生成 API 返回空选择列表")
+
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("图像生成 API 返回的消息内容为空")
+
+    # Parse image from markdown format: ![image](data:image/xxx;base64,...)
+    image_bytes = None
+    for fmt in ["jpeg", "png", "gif", "webp"]:
+        marker = f"![image](data:image/{fmt};base64,"
+        if marker in content:
+            try:
+                image_data = content.split(marker)[1].rstrip(")")
+                image_bytes = base64.b64decode(image_data)
+                break
+            except (IndexError, Exception) as e:
+                logging.warning(f"解析 {fmt} 格式图片失败: {e}")
+                continue
+
+    if image_bytes is None:
+        # Return text response if no image found
+        return None, content
+
+    return image_bytes, None
 
 
 def _generate_image_standard(

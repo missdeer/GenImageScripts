@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
-import base64
-import io
 import json
 import sys
 import os
 
-from PIL import Image
-
-from src.openai_compat import OpenAIConfig, encode_image_to_base64
+from src.openai_compat import OpenAIConfig, generate_image_via_chat
 
 
 def load_config(config_path: str) -> dict:
@@ -28,52 +24,9 @@ def load_config(config_path: str) -> dict:
         sys.exit(1)
 
 
-def convert_image_to_png(image_path: str, ext: str) -> tuple[str | None, str]:
-    """
-    将 BMP 或 SVG 图片转换为 PNG 格式并返回 base64 编码
-    
-    Args:
-        image_path: 图片文件路径
-        ext: 文件扩展名（.bmp 或 .svg）
-    
-    Returns:
-        元组 (base64编码字符串, MIME类型) 或 (None, "") 表示失败
-    """
-    try:
-        if ext == ".bmp":
-            # 使用 PIL 转换 BMP -> PNG
-            with Image.open(image_path) as img:
-                # 转换为 RGB 模式（如果需要）
-                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-                    img = img.convert("RGBA")
-                else:
-                    img = img.convert("RGB")
-                
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG")
-                buffer.seek(0)
-                return base64.b64encode(buffer.read()).decode("utf-8"), "image/png"
-        
-        elif ext == ".svg":
-            # 使用 cairosvg 转换 SVG -> PNG
-            try:
-                import cairosvg
-            except ImportError:
-                print("错误: 需要安装 cairosvg 来处理 SVG 文件: pip install cairosvg", file=sys.stderr)
-                return None, ""
-            
-            png_data = cairosvg.svg2png(url=image_path)
-            return base64.b64encode(png_data).decode("utf-8"), "image/png"
-        
-        return None, ""
-    
-    except Exception as e:
-        print(f"错误: 转换图片格式失败 '{image_path}': {e}", file=sys.stderr)
-        return None, ""
-
-
 # 可用的模型列表
 AVAILABLE_MODELS = [
+    "gemini-3-pro-image-preview", # 预览版
     "gemini-3-pro-image",        # 默认 1:1 比例
     "gemini-3-pro-image-3x4",    # 3:4 小红书风格
     "gemini-3-pro-image-4x3",    # 4:3 标准横图
@@ -119,19 +72,19 @@ prompt_group.add_argument(
     help="图片生成的提示词"
 )
 prompt_group.add_argument(
-    "--prompt-file",
+  "-f",  "--prompt-file",
     help="从文本文件读取提示词（不能与 -p/--prompt 同时使用）"
 )
 parser.add_argument(
-    "--base-url",
+   "-u", "--base-url",
     help="API 基础 URL（默认: http://127.0.0.1:8045/v1）"
 )
 parser.add_argument(
-    "--api-key",
+   "-k", "--api-key",
     help="API 密钥"
 )
 parser.add_argument(
-    "-o", "--output",
+   "-o", "--output",
     help="输出图片文件名（默认: xhs1.jpg）"
 )
 parser.add_argument(
@@ -241,97 +194,30 @@ def main():
         print("错误: 提示词不能为空", file=sys.stderr)
         sys.exit(1)
 
-    # 构建多模态 content 数组
-    message_content = [{"type": "text", "text": prompt_text}]
-
-    # 添加所有本地图片到 content 中
-    for image_path in images:
-        try:
-            ext = os.path.splitext(image_path)[1].lower()
-            
-            # BMP 和 SVG 需要先转换为 PNG
-            if ext in (".bmp", ".svg"):
-                image_base64, mime_type = convert_image_to_png(image_path, ext)
-                if image_base64 is None:
-                    print(f"错误: 无法转换图片文件 '{image_path}'", file=sys.stderr)
-                    sys.exit(1)
-            else:
-                image_base64 = encode_image_to_base64(image_path)
-                if image_base64 is None:
-                    print(f"错误: 无法读取图片文件 '{image_path}'", file=sys.stderr)
-                    sys.exit(1)
-                
-                # 检测图片 MIME 类型
-                mime_type = {
-                    ".png": "image/png",
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".gif": "image/gif",
-                    ".webp": "image/webp",
-                }.get(ext, "image/jpeg")
-            
-            message_content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{mime_type};base64,{image_base64}"
-                }
-            })
-        except Exception as e:
-            print(f"错误: 编码图片失败 '{image_path}': {e}", file=sys.stderr)
-            sys.exit(1)
-
     # 调用 API 生成图片
     try:
-        response = client.chat.completions.create(
+        image_bytes, text_response = generate_image_via_chat(
+            client=client,
             model=model,
-            messages=[{
-                "role": "user",
-                "content": message_content
-            }]
+            prompt=prompt_text,
+            reference_images=images if images else None,
         )
+    except RuntimeError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"错误: API 调用失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 解析响应
-    try:
-        if not response.choices:
-            print("错误: API 返回空响应", file=sys.stderr)
-            sys.exit(1)
-
-        temp = response.choices[0].message.content
-        if not temp:
-            print("错误: API 返回的消息内容为空", file=sys.stderr)
-            sys.exit(1)
-
-        # 尝试提取 base64 图片数据
-        if "![image](data:image/jpeg;base64," not in temp:
-            # 检查是否有其他图片格式
-            if "![image](data:image/png;base64," in temp:
-                image_data = temp.split("![image](data:image/png;base64,")[1].rstrip(")")
-            elif "![image](data:image/" in temp:
-                print(f"错误: 不支持的图片格式。响应内容: {temp[:200]}...", file=sys.stderr)
-                sys.exit(1)
-            else:
-                print(f"错误: 响应中未找到图片数据。响应内容: {temp[:500]}...", file=sys.stderr)
-                sys.exit(1)
+    # 检查是否生成了图片
+    if image_bytes is None:
+        if text_response:
+            print(f"错误: 响应中未找到图片数据。响应内容: {text_response[:500]}...", file=sys.stderr)
         else:
-            image_data = temp.split("![image](data:image/jpeg;base64,")[1].rstrip(")")
-
-    except IndexError:
-        print(f"错误: 解析图片数据失败。响应内容: {temp[:500]}...", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"错误: 处理响应失败: {e}", file=sys.stderr)
+            print("错误: 响应中未找到图片数据", file=sys.stderr)
         sys.exit(1)
 
-    # 解码并保存图片
-    try:
-        image_bytes = base64.b64decode(image_data)
-    except Exception as e:
-        print(f"错误: Base64 解码失败: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    # 保存图片
     try:
         with open(output, 'wb') as f:
             f.write(image_bytes)
