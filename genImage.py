@@ -84,7 +84,7 @@ prompt_group.add_argument(
     help="图片生成的提示词"
 )
 prompt_group.add_argument(
-  "-f",  "--prompt-file",
+    "-f",  "--prompt-file",
     help="从文本文件读取提示词（不能与 -p/--prompt 同时使用）"
 )
 parser.add_argument(
@@ -115,7 +115,7 @@ parser.add_argument(
 # Gemini 图片生成参数
 parser.add_argument(
     "-t", "--aspect-ratio",
-    help="图片宽高比（gemini/vertexai 模式，默认: 1:1）\n可选值: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16, 9:21"
+    help="图片宽高比（gemini/vertexai 模式，默认: 1:1）\n可选值: 21:9, 16:9, 3:2, 4:3, 5:3, 5:4, 1:1, 4:5, 3:5, 3:4, 2:3, 9:16, 9:21"
 )
 parser.add_argument(
     "-r", "--resolution",
