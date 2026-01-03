@@ -47,14 +47,13 @@ AVAILABLE_MODELS = [
 DEFAULTS = {
     "api_service": "gemini",
     "model": "gemini-3-pro-image-preview",
-    "base_url": "http://127.0.0.1:8045/v1",
-    "api_key": "sk-c526bb53270242339bd07504d11607a4",
-    "output": "xhs1.jpg",
+    "base_url": "http://192.168.233.166:8317",
+    "api_key": "your-api-key-1",
+    "output": "output.jpg",
     "location": "us-central1",
-    "aspect_ratio": "1:1",
-    "resolution": "1K",
-    "prompt": '''为以下文字生成小红书风格3:4宽高比的图片，要求将以下文本完整显示在图中，不要修改，字体颜色为黑色，字体大一点，不要使图片留出很多空白。添加浅色的科技感的背景，搜索你的知识库或网络并添加Claude Code和Gemini CLI和Codex CLI三者的官方logo在背景上：
-"不用 MCP ，不用 SKILLs ，多 agent 协作让 Claude Code 调用 Gemini CLI 和 Codex CLI 只需要在 CLAUDE.md 里加两句话…"'''
+    "aspect_ratio": "3:4",
+    "resolution": "4K",
+    "prompt": "美丽的中国少女穿着浅色碎花短裙在小溪里玩水，头戴遮阳帽，小溪旁巨大的树荫挡住了阳光"
 }
 
 # 解析命令行参数
