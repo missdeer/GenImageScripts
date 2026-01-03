@@ -115,7 +115,7 @@ parser.add_argument(
 # Gemini 图片生成参数
 parser.add_argument(
     "-t", "--aspect-ratio",
-    help="图片宽高比（gemini/vertexai 模式，默认: 1:1）\n可选值: 21:9, 16:9, 3:2, 4:3, 5:3, 5:4, 1:1, 4:5, 3:5, 3:4, 2:3, 9:16, 9:21"
+    help="图片宽高比（gemini/vertexai 模式，默认: 1:1）\n可选值: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9"
 )
 parser.add_argument(
     "-r", "--resolution",
