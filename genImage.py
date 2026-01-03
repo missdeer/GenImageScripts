@@ -96,7 +96,7 @@ parser.add_argument(
 )
 parser.add_argument(
    "-o", "--output",
-    help="输出图片文件名（默认: xhs1.jpg）"
+    help="输出图片文件名（默认: output.jpg）"
 )
 # Vertex AI 专用参数
 parser.add_argument(
