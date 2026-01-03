@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Google GenAI (Gemini) client utilities for text and image generation."""
 
+import io
 import logging
 import os
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 from PIL import Image
+
+from .utils import load_image
 
 __all__ = [
     "GeminiConfig",
@@ -149,10 +152,10 @@ def generate_image(
         for img_path in reference_images:
             if img_path.exists():
                 try:
-                    img = Image.open(img_path)
+                    img = load_image(img_path)
                     opened_images.append(img)
                     contents.append(img)
-                except (OSError, IOError) as e:
+                except (OSError, IOError, ValueError) as e:
                     logging.warning(f"无法打开参考图片 {img_path}: {e}")
             else:
                 logging.warning(f"参考图片不存在: {img_path}")
