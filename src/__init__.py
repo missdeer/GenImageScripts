@@ -1,6 +1,6 @@
 """GenImageScripts LLM utilities package."""
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .gemini import (
     GeminiConfig as _GeminiConfig,
@@ -27,7 +27,7 @@ class APIService:
         generate_text: Callable,
         generate_image: Callable,
         default_base_url: str,
-        default_location: str | None = None,
+        default_location: Optional[str] = None,
     ):
         self.config_class = config_class
         self.generate_text = generate_text

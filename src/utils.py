@@ -6,6 +6,7 @@ import io
 import logging
 import os
 from pathlib import Path
+from typing import Optional, Tuple
 
 from PIL import Image
 
@@ -34,7 +35,7 @@ def load_image(img_path: Path) -> Image.Image:
     return Image.open(img_path)
 
 
-def encode_image_to_base64(image_path) -> str | None:
+def encode_image_to_base64(image_path) -> Optional[str]:
     """Encode an image file to base64 string.
     
     Args:
@@ -76,7 +77,7 @@ def get_mime_type(file_path: str) -> str:
     }.get(ext, "image/jpeg")
 
 
-def convert_image_to_png(image_path: str, ext: str) -> tuple[str | None, str]:
+def convert_image_to_png(image_path: str, ext: str) -> Tuple[Optional[str], str]:
     """Convert BMP image to PNG format and return base64 encoding.
 
     Args:
@@ -107,7 +108,7 @@ def convert_image_to_png(image_path: str, ext: str) -> tuple[str | None, str]:
         return None, ""
 
 
-def encode_image_for_api(image_path: str) -> tuple[str | None, str]:
+def encode_image_for_api(image_path: str) -> Tuple[Optional[str], str]:
     """Encode an image file to base64 with proper MIME type.
 
     Handles BMP by converting to PNG first.

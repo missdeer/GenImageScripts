@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -34,13 +35,13 @@ FINISH_REASON_STOP = 1
 class GeminiConfig:
     """Configuration for creating Google GenAI (Gemini) client."""
     # API Key mode
-    api_key: str | None = None
+    api_key: Optional[str] = None
     base_url: str = DEFAULT_BASE_URL
     # Vertex AI mode
     vertex: bool = False
-    project: str | None = None
+    project: Optional[str] = None
     location: str = DEFAULT_LOCATION
-    credentials: str | None = None
+    credentials: Optional[str] = None
 
     def create_client(self) -> genai.Client:
         """Create a GenAI client based on the configuration."""
@@ -124,10 +125,10 @@ def generate_image(
     client: genai.Client,
     model: str,
     prompt: str,
-    reference_images: list[Path] | None = None,
+    reference_images: Optional[List[Path]] = None,
     aspect_ratio: str = "3:4",
     resolution: str = "1K",
-) -> tuple[Image.Image | None, str | None]:
+) -> Tuple[Optional[Image.Image], Optional[str]]:
     """Generate an image using the specified model.
 
     Args:
@@ -216,10 +217,10 @@ def generate_image_via_chat(
     client: genai.Client,
     model: str,
     prompt: str,
-    reference_images: list[str] | None = None,
+    reference_images: Optional[List[str]] = None,
     aspect_ratio: str = "3:4",
     resolution: str = "1K",
-) -> tuple[bytes | None, str | None]:
+) -> Tuple[Optional[bytes], Optional[str]]:
     """Generate an image using chat-style API and return raw bytes.
 
     This is a wrapper around generate_image that returns image bytes

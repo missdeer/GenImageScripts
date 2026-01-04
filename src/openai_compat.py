@@ -6,6 +6,7 @@ import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 from PIL import Image
 
@@ -38,9 +39,9 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 @dataclass
 class OpenAIConfig:
     """Configuration for creating OpenAI-compatible client."""
-    api_key: str | None = None
+    api_key: Optional[str] = None
     base_url: str = DEFAULT_BASE_URL
-    model: str | None = None  # Default model name
+    model: Optional[str] = None  # Default model name
 
     def create_client(self):
         """Create an OpenAI client based on the configuration.
@@ -111,9 +112,9 @@ def generate_image(
     client,
     model: str,
     prompt: str,
-    reference_images: list | None = None,
+    reference_images: Optional[List] = None,
     size: str = "1024x1024",
-) -> tuple[Image.Image | None, str | None]:
+) -> Tuple[Optional[Image.Image], Optional[str]]:
     """Generate an image using the specified model.
 
     Args:
@@ -148,8 +149,8 @@ def generate_image_via_chat(
     client,
     model: str,
     prompt: str,
-    reference_images: list[str] | None = None,
-) -> tuple[bytes | None, str | None]:
+    reference_images: Optional[List[str]] = None,
+) -> Tuple[Optional[bytes], Optional[str]]:
     """Generate an image using chat completions API.
 
     This is used for models that return images embedded in chat responses
@@ -230,7 +231,7 @@ def _generate_image_standard(
     model: str,
     prompt: str,
     size: str,
-) -> tuple[Image.Image | None, str | None]:
+) -> Tuple[Optional[Image.Image], Optional[str]]:
     """Generate image using standard images.generate API."""
     try:
         response = client.images.generate(
@@ -253,7 +254,7 @@ def _generate_image_with_reference(
     prompt: str,
     reference_images: list,
     size: str,
-) -> tuple[Image.Image | None, str | None]:
+) -> Tuple[Optional[Image.Image], Optional[str]]:
     """Generate image with reference images using images.edit API or chat completions."""
     from pathlib import Path
     
@@ -338,7 +339,7 @@ def _generate_image_with_reference(
         raise RuntimeError(f"图像生成失败: {e}") from e
 
 
-def _parse_image_response(response) -> tuple[Image.Image | None, str | None]:
+def _parse_image_response(response) -> Tuple[Optional[Image.Image], Optional[str]]:
     """Parse image generation API response."""
     if response is None:
         raise RuntimeError("图像生成 API 返回空响应")
