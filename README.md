@@ -5,7 +5,7 @@
 ## 使用方法
 
 ```bash
-python gis.py "主题" [选项...]
+python genRednoets.py "主题" [选项...]
 ```
 
 ## 参数说明
@@ -87,7 +87,7 @@ python gis.py "主题" [选项...]
 然后运行：
 
 ```bash
-python gis.py -c config.json
+python genRednoets.py -c config.json
 ```
 
 ## 使用示例
@@ -95,7 +95,7 @@ python gis.py -c config.json
 ### 命令行方式
 
 ```bash
-python gis.py "Python入门教程" -k YOUR_API_KEY -r style.png -o outline.txt -p image.txt -d ./output
+python genRednoets.py "Python入门教程" -k YOUR_API_KEY -r style.png -o outline.txt -p image.txt -d ./output
 ```
 
 ### 环境变量方式
@@ -106,14 +106,14 @@ set GEMINI_API_KEY=your-api-key
 set GRN_REF_IMAGE=style.png
 set GRN_OUTLINE_PROMPT=outline.txt
 set GRN_IMAGE_PROMPT=image.txt
-python gis.py "Python入门教程"
+python genRednoets.py "Python入门教程"
 
 # Linux/macOS
 export GEMINI_API_KEY=your-api-key
 export GRN_REF_IMAGE=style.png
 export GRN_OUTLINE_PROMPT=outline.txt
 export GRN_IMAGE_PROMPT=image.txt
-python gis.py "Python入门教程"
+python genRednoets.py "Python入门教程"
 ```
 
 ### 混合方式
@@ -124,7 +124,7 @@ set GEMINI_API_KEY=your-api-key
 set GRN_REF_IMAGE=style.png
 
 # 命令行覆盖特定参数
-python gis.py "主题" -o outline.txt -p image.txt -a 16:9
+python genRednoets.py "主题" -o outline.txt -p image.txt -a 16:9
 ```
 
 ## 输出文件
@@ -135,3 +135,7 @@ python gis.py "主题" -o outline.txt -p image.txt -a 16:9
 - `Page1.png`, `Page2.png`, ... - 生成的各页图片
 - `page1.txt`, `page2.txt`, ... - 每页使用的最终提示词
 - `gen.log` - 运行日志
+
+## 依赖
+
+- Python >= 3.10
