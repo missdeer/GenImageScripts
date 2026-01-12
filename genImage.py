@@ -88,7 +88,7 @@ prompt_group.add_argument(
 )
 parser.add_argument(
    "-u", "--base-url",
-    help="API 基础 URL（默认: http://127.0.0.1:8045/v1）"
+    help="API 基础 URL（默认: http://192.168.233.166:8317），如果使用OpenAI API，需要在最后加上/v1，如：http://127.0.0.1:8045/v1"
 )
 parser.add_argument(
    "-k", "--api-key",
